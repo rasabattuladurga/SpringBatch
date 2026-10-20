@@ -1,0 +1,1 @@
+INSERT INTO BOOK (IBSN, NAME, AUTHOR) VALUES ('1001', 'The Psychology of Money', 'Morgan Housel');

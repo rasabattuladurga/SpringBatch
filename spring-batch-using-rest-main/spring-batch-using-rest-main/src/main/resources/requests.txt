@@ -1,0 +1,153 @@
+#REQUEST TO UPLOAD CSV BATCH FILE
+
+POST /batchFile/upload 
+HTTP/1.1
+Host: localhost:8080
+Content-Length: 295
+Content-Type: multipart/form-data; boundary=----WebKitFormBoundary7MA4YWxkTrZu0gW
+
+----WebKitFormBoundary7MA4YWxkTrZu0gW
+Content-Disposition: form-data; name="file"; filename="/C:/Users/chait/Desktop/books.csv"
+Content-Type: text/csv
+
+(data)
+----WebKitFormBoundary7MA4YWxkTrZu0gW
+Content-Disposition: form-data; name="sourceSystemId"
+
+ACER
+----WebKitFormBoundary7MA4YWxkTrZu0gW
+
+
+#RESPONSE
+{
+    "fileId": "ca3ba",
+    "name": "books.csv",
+    "size": 603,
+    "sourceSystemId": "ACER",
+    "startTime": "2021-07-27T07:29:58.896+00:00",
+    "endTime": "2021-07-27T07:29:58.902+00:00"
+}
+
+----------------------------------------------------------------------------------------------
+#REQUEST TO START BATCH;
+
+POST /job/start 
+HTTP/1.1
+Host: localhost:8080
+Content-Type: application/json
+Content-Length: 128
+
+{
+    "fileId": "ca3ba",
+    "parameters": {
+        "source-system-job-Id": "12356",
+        "date": "26-07-2021"
+    }
+}
+
+#RESPONSE
+{
+    "jodId": 1,
+    "exeutionId": 1,
+    "processed": 0,
+    "skipped": 0
+}
+
+-------------------------------------------------------------------------------------------------
+#REQUST ALL JOB INSTANCE INFORMATION
+
+GET /job/instances/importBookJob 
+HTTP/1.1
+Host: localhost:8080
+
+#RESPONSE
+[
+    {
+        "jobname": "importBookJob",
+        "jobId": 1,
+        "executions": [
+            {
+                "executionId": 1,
+                "status": "COMPLETED"
+            }
+        ]
+    }
+]
+--------------------------------------------------------------------------------------------------
+#REQUEST JOB EXECTION PROGRESS
+
+GET /job/1/execution/1 
+HTTP/1.1
+Host: localhost:8080
+
+#RESPONSE
+{
+    "jodId": 1,
+    "exeutionId": 1,
+    "status": "COMPLETED",
+    "startTime": "2021-07-27T07:30:05.301+00:00",
+    "endTime": "2021-07-27T07:30:05.485+00:00",
+    "processed": 14,
+    "skipped": 1,
+    "failureExceptions": []
+}
+
+---------------------------------------------------------------------------------------------------
+#REQUEST 
+
+GET /job/stop/1 
+HTTP/1.1
+Host: localhost:8080
+
+---------------------------------------------------------------------------------------------------
+#REQUEST RESATRT
+
+GET /job/restart/1 HTTP/1.1
+Host: localhost:8080
+
+-----------------------------------------------------------------------------------------------------
+
+
+# REQUEST TO SEARCH BOOKS
+
+#REQUEST
+GET /books/search?query=ibsn:1001,author:Morgan Housel 
+HTTP/1.1
+Host: localhost:8080
+
+#RESPONSE
+{
+    "content": [
+        {
+            "ibsn": "1001",
+            "name": "The Psychology of Money",
+            "author": "Morgan Housel",
+            "tags": []
+        }
+    ],
+    "pageable": {
+        "sort": {
+            "sorted": false,
+            "unsorted": true,
+            "empty": true
+        },
+        "offset": 0,
+        "pageNumber": 0,
+        "pageSize": 10,
+        "paged": true,
+        "unpaged": false
+    },
+    "last": true,
+    "totalPages": 1,
+    "totalElements": 1,
+    "size": 10,
+    "number": 0,
+    "sort": {
+        "sorted": false,
+        "unsorted": true,
+        "empty": true
+    },
+    "first": true,
+    "numberOfElements": 1,
+    "empty": false
+}
