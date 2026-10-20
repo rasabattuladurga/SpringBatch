@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+	<modelVersion>4.0.0</modelVersion>
+	<parent>
+		<groupId>org.springframework.batch</groupId>
+		<artifactId>spring-batch</artifactId>
+		<version>6.1.0-SNAPSHOT</version>
+	</parent>
+	<artifactId>spring-batch-bom</artifactId>
+	<packaging>pom</packaging>
+	<name>Spring Batch BOM</name>
+	<description>Bill of materials for Spring Batch modules</description>
+	<url>https://projects.spring.io/spring-batch</url>
+
+	<organization>
+		<name>Spring</name>
+		<url>https://spring.io</url>
+	</organization>
+
+	<scm>
+		<url>https://github.com/spring-projects/spring-batch</url>
+		<connection>git://github.com/spring-projects/spring-batch.git</connection>
+		<developerConnection>git@github.com:spring-projects/spring-batch.git</developerConnection>
+	</scm>
+
+	<issueManagement>
+		<system>Github Issues</system>
+		<url>https://github.com/spring-projects/spring-batch/issues</url>
+	</issueManagement>
+
+	<ciManagement>
+		<system>Github Actions</system>
+		<url>https://github.com/spring-projects/spring-batch/actions</url>
+	</ciManagement>
+
+	<licenses>
+		<license>
+			<name>Apache 2.0</name>
+			<url>https://www.apache.org/licenses/LICENSE-2.0.txt</url>
+			<distribution>repo</distribution>
+		</license>
+	</licenses>
+
+	<dependencyManagement>
+		<dependencies>
+			<dependency>
+				<groupId>org.springframework.batch</groupId>
+				<artifactId>spring-batch-core</artifactId>
+				<version>${project.parent.version}</version>
+			</dependency>
+			<dependency>
+				<groupId>org.springframework.batch</groupId>
+				<artifactId>spring-batch-infrastructure</artifactId>
+				<version>${project.parent.version}</version>
+			</dependency>
+			<dependency>
+				<groupId>org.springframework.batch</groupId>
+				<artifactId>spring-batch-integration</artifactId>
+				<version>${project.parent.version}</version>
+			</dependency>
+			<dependency>
+				<groupId>org.springframework.batch</groupId>
+				<artifactId>spring-batch-test</artifactId>
+				<version>${project.parent.version}</version>
+			</dependency>
+		</dependencies>
+	</dependencyManagement>
+
+	<build>
+		<plugins>
+			<!--
+				The parent pom imports BOMs (Spring Framework, Spring Data, Micrometer) in its
+				dependencyManagement section. The flatten-maven-plugin is configured in the parent
+				to 'resolve' dependencyManagement, which would expand those imported BOMs into the
+				flattened spring-batch-bom. Override it here to 'keep' so the published BOM only
+				contains the spring-batch-* modules declared above.
+			-->
+			<plugin>
+				<groupId>org.codehaus.mojo</groupId>
+				<artifactId>flatten-maven-plugin</artifactId>
+				<executions>
+					<execution>
+						<id>flatten</id>
+						<configuration>
+							<pomElements>
+								<dependencyManagement>interpolate</dependencyManagement>
+							</pomElements>
+						</configuration>
+					</execution>
+				</executions>
+			</plugin>
+		</plugins>
+	</build>
+
+</project>

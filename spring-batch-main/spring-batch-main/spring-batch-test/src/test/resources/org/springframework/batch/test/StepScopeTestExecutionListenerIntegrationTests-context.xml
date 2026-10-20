@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	   xmlns:batch="http://www.springframework.org/schema/batch"
+	   xsi:schemaLocation="http://www.springframework.org/schema/beans https://www.springframework.org/schema/beans/spring-beans.xsd
+		http://www.springframework.org/schema/batch https://www.springframework.org/schema/batch/spring-batch.xsd">
+
+	<batch:job-repository id="jobRepository" table-prefix="BATCH_"/>
+
+	<import resource="classpath:/data-source-context.xml" />
+
+	<job id="job" xmlns="http://www.springframework.org/schema/batch">
+		<step id="step"><tasklet ref="reader" method="read"/></step>
+	</job>
+
+	<bean id="reader" class="org.springframework.batch.infrastructure.item.file.FlatFileItemReader" scope="step">
+		<constructor-arg name="lineMapper">
+			<bean class="org.springframework.batch.infrastructure.item.file.mapping.PassThroughLineMapper" />
+		</constructor-arg>
+		<property name="resource" value="#{stepExecutionContext['input.file']}" />
+	</bean>
+
+</beans>

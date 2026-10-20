@@ -1,0 +1,361 @@
+[[configuringJobRepository]]
+= Configuring a JobRepository
+
+As described the xref:job.adoc[earlier], the `JobRepository` is used for basic CRUD operations
+of the various persisted domain objects within Spring Batch, such as `JobExecution` and `StepExecution`.
+It is required by many of the major framework features, such as the `JobOperator`,
+`Job`, and `Step`.
+
+== Configuring a Resourceless JobRepository
+
+The simplest implementation of the `JobRepository` interface is the
+`ResourcelessJobRepository`. This implementation does not use or store batch meta-data.
+It is intended for use-cases where restartability is not required and where the execution context
+is not involved in any way (like sharing data between steps through the execution context,
+or partitioned steps where partitions meta-data is shared between the manager and workers through
+the execution context, etc). This implementation holds the minimal state to run a single job
+(ie 1 job instance + 1 job execution + N step executions). This is suitable for one-time jobs
+executed in their own JVM. This job repository works with transactional steps as well as non-transactional
+steps (in conjunction with `ResourcelessTransactionManager`).
+
+IMPORTANT: This implementation is *not* thread-safe and should *not* be used in any concurrent environment.
+
+By default, when using `@EnableBatchProcessing` or `DefaultBatchConfiguration`, a `ResourcelessJobRepository`
+is provided for you.
+
+== Configuring a JDBC JobRepository
+
+[tabs]
+====
+Java::
++
+When using `@EnableBatchProcessing`, a `ResourcelessJobRepository` is provided for you.
+This section describes how to customize it. Spring Batch provides two implementations
+of the `JobRepository` interface which are backed by a database: a JDBC implementation
+(which can be used with any JDBC-compliant database) and a MongoDB implementation. These two
+implementations are provided by the `@EnableJdbcJobRepository` and `@EnableMongoJobRepository`
+annotations, respectively.
++
+The following example shows how to customize a JDBC-based job repository through the attributes
+of the `@EnableJdbcJobRepository` annotation:
++
+.Java Configuration
+[source, java]
+----
+@Configuration
+@EnableBatchProcessing
+@EnableJdbcJobRepository(
+		dataSourceRef = "batchDataSource",
+		transactionManagerRef = "batchTransactionManager",
+		tablePrefix = "BATCH_",
+		maxVarCharLength = 1000,
+		isolationLevelForCreate = "SERIALIZABLE")
+public class MyJobConfiguration {
+
+   // job definition
+
+}
+----
++
+None of the configuration options listed here are required.
+If they are not set, the defaults shown earlier are used.
+The max `varchar` length defaults to `2500`, which is the
+length of the long `VARCHAR` columns in the
+xref:schema-appendix.adoc#metaDataSchemaOverview[sample schema scripts]
+
+
+XML::
++
+The batch namespace abstracts away many of the implementation details of the
+`JobRepository` implementations and their collaborators. However, there are still a few
+configuration options available, as the following example shows:
++
+.XML Configuration
+[source, xml]
+----
+<job-repository id="jobRepository"
+    data-source="dataSource"
+    transaction-manager="transactionManager"
+    isolation-level-for-create="SERIALIZABLE"
+    table-prefix="BATCH_"
+	max-varchar-length="1000"/>
+----
++
+Other than the `id`, none of the configuration options listed earlier are required. If they are
+not set, the defaults shown earlier are used.
+The `max-varchar-length` defaults to `2500`, which is the length of the long
+`VARCHAR` columns in the xref:schema-appendix.adoc#metaDataSchemaOverview[sample schema scripts].
+====
+
+== Configuring a MongoDB JobRepository
+
+Similar to the JDBC-based `JobRepository`, the MongoDB-based `JobRepository` requires some collections
+to store the batch metadata. These collections are defined in the `org/springframework/batch/core/schema-mongodb.jsonl`
+of the `spring-batch-core` jar. As with the JDBC-based `JobRepository`, you need to create these collections
+in your MongoDB database before running any job.
+
+Moreover, since it is https://www.mongodb.com/docs/manual/core/dot-dollar-considerations/[not recommended] to use `.` in
+field names in MongoDB documents, you need to customize the `MongoTemplate` used by the `MongoJobRepositoryFactoryBean`
+to replace `.` with another character (for example, `_`) in the field names. You can do this by customizing the `MappingMongoConverter`
+used by the `MongoTemplate`. The following example shows how to do this in Java configuration:
+
+.Java Configuration
+[source, java]
+----
+@Bean
+public MongoTemplate mongoTemplate(MongoDatabaseFactory mongoDatabaseFactory) {
+    MongoTemplate template = new MongoTemplate(mongoDatabaseFactory);
+    MappingMongoConverter converter = (MappingMongoConverter) template.getConverter();
+    converter.setMapKeyDotReplacement("_");
+    return template;
+}
+----
+
+[[txConfigForJobRepository]]
+== Transaction Configuration for the JobRepository
+
+If the namespace or the provided `FactoryBean` is used, transactional advice is
+automatically created around the repository. This is to ensure that the batch metadata,
+including state that is necessary for restarts after a failure, is persisted correctly.
+The behavior of the framework is not well defined if the repository methods are not
+transactional. The isolation level in the `create*` method attributes is specified
+separately to ensure that, when jobs are launched, if two processes try to launch
+the same job at the same time, only one succeeds. The default isolation level for that
+method is `SERIALIZABLE`, which is quite aggressive. `READ_COMMITTED` usually works equally
+well. `READ_UNCOMMITTED` is fine if two processes are not likely to collide in this
+way. However, since a call to the `create*` method is quite short, it is unlikely that
+`SERIALIZED` causes problems, as long as the database platform supports it. However, you
+can override this setting.
+
+
+[tabs]
+====
+Java::
++
+The following example shows how to override the isolation level in Java:
++
+.Java Configuration
+[source, java]
+----
+@Configuration
+@EnableBatchProcessing
+@EnableJdbcJobRepository(isolationLevelForCreate = "ISOLATION_REPEATABLE_READ")
+public class MyJobConfiguration {
+
+   // job definition
+
+}
+----
+
+XML::
++
+The following example shows how to override the isolation level in XML:
++
+.XML Configuration
+[source, xml]
+----
+<job-repository id="jobRepository"
+                isolation-level-for-create="REPEATABLE_READ" />
+----
+====
+
+
+If the namespace is not used, you must also configure the
+transactional behavior of the repository by using AOP.
+
+[tabs]
+====
+Java::
++
+The following example shows how to configure the transactional behavior of the repository
+in Java:
++
+.Java Configuration
+[source, java]
+----
+@Bean
+public TransactionProxyFactoryBean baseProxy() {
+	TransactionProxyFactoryBean transactionProxyFactoryBean = new TransactionProxyFactoryBean();
+	Properties transactionAttributes = new Properties();
+	transactionAttributes.setProperty("*", "PROPAGATION_REQUIRED");
+	transactionProxyFactoryBean.setTransactionAttributes(transactionAttributes);
+	transactionProxyFactoryBean.setTarget(jobRepository());
+	transactionProxyFactoryBean.setTransactionManager(transactionManager());
+	return transactionProxyFactoryBean;
+}
+----
+
+XML::
++
+The following example shows how to configure the transactional behavior of the repository
+in XML:
++
+.XML Configuration
+[source, xml]
+----
+<aop:config>
+    <aop:advisor
+           pointcut="execution(* org.springframework.batch.core..*Repository+.*(..))"/>
+    <advice-ref="txAdvice" />
+</aop:config>
+
+<tx:advice id="txAdvice" transaction-manager="transactionManager">
+    <tx:attributes>
+        <tx:method name="*" />
+    </tx:attributes>
+</tx:advice>
+----
++
+You can use the preceding fragment nearly as is, with almost no changes. Remember also to
+include the  appropriate namespace declarations and to make sure `spring-tx` and `spring-aop`
+(or the whole of Spring) are on the classpath.
+====
+
+
+
+
+[[repositoryTablePrefix]]
+== Changing the Table Prefix
+
+Another modifiable property of the `JobRepository` is the table prefix of the meta-data
+tables. By default, they are all prefaced with `BATCH_`. `BATCH_JOB_EXECUTION` and
+`BATCH_STEP_EXECUTION` are two examples. However, there are potential reasons to modify this
+prefix. If the schema names need to be prepended to the table names or if more than one
+set of metadata tables is needed within the same schema, the table prefix needs to
+be changed.
+
+
+[tabs]
+====
+Java::
++
+The following example shows how to change the table prefix in Java:
++
+.Java Configuration
+[source, java]
+----
+@Configuration
+@EnableBatchProcessing
+@EnableJdbcJobRepository(tablePrefix = "SYSTEM.TEST_")
+public class MyJobConfiguration {
+
+   // job definition
+
+}
+----
+
+XML::
++
+The following example shows how to change the table prefix in XML:
++
+.XML Configuration
+[source, xml]
+----
+<job-repository id="jobRepository"
+                table-prefix="SYSTEM.TEST_" />
+----
+
+====
+
+Given the preceding changes, every query to the metadata tables is prefixed with
+`SYSTEM.TEST_`. `BATCH_JOB_EXECUTION` is referred to as `SYSTEM.TEST_JOB_EXECUTION`.
+
+NOTE: Only the table prefix is configurable. The table and column names are not.
+
+[[repositoryCollectionPrefix]]
+== Changing the Collection Prefix
+
+The MongoDB job repository offers the same capability for the metadata collections. By
+default, they are all prefixed with `BATCH_`: `BATCH_JOB_INSTANCE`,
+`BATCH_JOB_EXECUTION`, `BATCH_STEP_EXECUTION` and `BATCH_SEQUENCES`. The prefix can be
+changed to run several applications against the same MongoDB database, or to isolate
+environments from each other.
+
+.Java Configuration
+[source, java]
+----
+@Configuration
+@EnableBatchProcessing
+@EnableMongoJobRepository(collectionPrefix = "MY_APP_")
+public class MyJobConfiguration {
+
+   // job definition
+
+}
+----
+
+Given the preceding change, the metadata is stored in the `MY_APP_JOB_INSTANCE`,
+`MY_APP_JOB_EXECUTION`, `MY_APP_STEP_EXECUTION` and `MY_APP_SEQUENCES` collections. The
+identifiers of the sequence documents held in the sequences collection are prefixed as
+well, so `MY_APP_SEQUENCES` contains `MY_APP_JOB_INSTANCE_SEQ`,
+`MY_APP_JOB_EXECUTION_SEQ` and `MY_APP_STEP_EXECUTION_SEQ`.
+
+IMPORTANT: The `org/springframework/batch/core/schema-mongodb.jsonl` script that creates
+the collections and seeds the sequence documents uses the default prefix. When you
+configure a custom prefix, you need to adapt that script accordingly, just as you would
+adapt the DDL scripts for a custom table prefix.
+
+NOTE: Only the collection prefix is configurable. The collection and field names are not.
+
+[[nonStandardDatabaseTypesInRepository]]
+== Non-standard Database Types in a Repository
+
+If you use a database platform that is not in the list of supported platforms, you
+may be able to use one of the supported types, if the SQL variant is close enough. To do
+this, you can use the raw `JdbcJobRepositoryFactoryBean` instead of the namespace shortcut and
+use it to set the database type to the closest match.
+
+WARNING: The `derby` database type is deprecated as of Spring Batch 6.1.0 and will be
+removed in version 7.0.0. If you are currently running the job repository on Apache
+Derby, you should plan a migration to another supported database platform.
+
+[tabs]
+====
+Java::
++
+The following example shows how to use `JdbcJobRepositoryFactoryBean` to set the database type
+to the closest match in Java:
++
+.Java Configuration
+[source, java]
+----
+@Bean
+public JobRepository jobRepository() throws Exception {
+    JdbcJobRepositoryFactoryBean factory = new JdbcJobRepositoryFactoryBean();
+    factory.setDataSource(dataSource);
+    factory.setDatabaseType("db2");
+    factory.setTransactionManager(transactionManager);
+    return factory.getObject();
+}
+----
+
+XML::
++
+The following example shows how to use `JdbcJobRepositoryFactoryBean` to set the database type
+to the closest match in XML:
++
+.XML Configuration
+[source, xml]
+----
+<bean id="jobRepository" class="org...JdbcJobRepositoryFactoryBean">
+    <property name="databaseType" value="db2"/>
+    <property name="dataSource" ref="dataSource"/>
+</bean>
+----
+
+====
+
+
+If the database type is not specified, the `JdbcJobRepositoryFactoryBean` tries to
+auto-detect the database type from the `DataSource`.
+The major differences between platforms are
+mainly accounted for by the strategy for incrementing primary keys, so
+it is often necessary to override the
+`incrementerFactory` as well (by using one of the standard
+implementations from the Spring Framework).
+
+If even that does not work or if you are not using an RDBMS, the
+only option may be to implement the various `Dao`
+interfaces that the `SimpleJobRepository` depends
+on and wire one up manually in the normal Spring way.
+

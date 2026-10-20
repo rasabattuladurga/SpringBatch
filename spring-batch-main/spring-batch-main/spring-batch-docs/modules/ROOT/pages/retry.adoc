@@ -1,0 +1,19 @@
+
+[[retry]]
+
+[[retry]]
+= Retry
+:page-section-summary-toc: 1
+
+
+To make processing more robust and less prone to failure, it sometimes helps to
+automatically retry a failed operation in case it might succeed on a subsequent attempt.
+Errors that are susceptible to intermittent failure are often transient in nature.
+Examples include remote calls to a web service that fails because of a network glitch or a
+`DeadlockLoserDataAccessException` in a database update.
+
+[NOTE]
+====
+As of v6.0, Spring Batch does *not* use https://github.com/spring-projects/spring-retry[Spring Retry] to automate retry operations within the framework,
+and is now based on the https://docs.spring.io/spring-framework/reference/7.0/core/resilience.html[core retry feature] provided by Spring Framework 7.0.
+====

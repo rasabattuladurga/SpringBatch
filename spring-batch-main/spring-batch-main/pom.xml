@@ -1,0 +1,435 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/maven-v4_0_0.xsd">
+	<modelVersion>4.0.0</modelVersion>
+	<groupId>org.springframework.batch</groupId>
+	<artifactId>spring-batch</artifactId>
+	<name>Spring Batch</name>
+	<description>Spring Batch is a lightweight, comprehensive batch framework
+		designed to enable the development of robust batch applications vital
+		for the daily operations of enterprise systems. Spring Batch is part of
+		the Spring Portfolio.</description>
+	<version>6.1.0-SNAPSHOT</version>
+	<packaging>pom</packaging>
+	<url>https://projects.spring.io/spring-batch</url>
+
+	<modules>
+		<module>spring-batch-infrastructure</module>
+		<module>spring-batch-core</module>
+		<module>spring-batch-test</module>
+		<module>spring-batch-integration</module>
+		<module>spring-batch-samples</module>
+		<module>spring-batch-docs</module>
+		<module>spring-batch-bom</module>
+	</modules>
+
+	<organization>
+		<name>Spring</name>
+		<url>https://spring.io</url>
+	</organization>
+	<scm>
+		<url>https://github.com/spring-projects/spring-batch</url>
+		<connection>git://github.com/spring-projects/spring-batch.git</connection>
+		<developerConnection>git@github.com:spring-projects/spring-batch.git</developerConnection>
+	</scm>
+	<issueManagement>
+		<system>Github Issues</system>
+		<url>https://github.com/spring-projects/spring-batch/issues</url>
+	</issueManagement>
+	<ciManagement>
+		<system>Github Actions</system>
+		<url>https://github.com/spring-projects/spring-batch/actions</url>
+	</ciManagement>
+	<licenses>
+		<license>
+			<name>Apache 2.0</name>
+			<url>https://www.apache.org/licenses/LICENSE-2.0.txt</url>
+			<distribution>repo</distribution>
+		</license>
+	</licenses>
+	<properties>
+		<!-- common properties -->
+		<project.build.outputTimestamp>1980-02-01T00:00:00Z</project.build.outputTimestamp>
+		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+		<java.version>17</java.version>
+
+		<!-- production dependencies -->
+		<spring-framework.version>7.1.0-SNAPSHOT</spring-framework.version>
+		<spring-retry.version>2.0.13</spring-retry.version>
+		<spring-integration.version>7.2.0-SNAPSHOT</spring-integration.version>
+		<micrometer.version>1.18.0-SNAPSHOT</micrometer.version>
+
+		<!-- optional production dependencies -->
+		<spring-data-bom.version>2026.1.0-SNAPSHOT</spring-data-bom.version>
+		<spring-kafka.version>4.2.0-SNAPSHOT</spring-kafka.version>
+		<spring-amqp.version>4.2.0-SNAPSHOT</spring-amqp.version>
+		<spring-ldap.version>4.2.0-SNAPSHOT</spring-ldap.version>
+
+		<jackson2.version>2.22.2</jackson2.version>
+		<jackson3.version>3.2.2</jackson3.version>
+		<avro.version>1.12.2</avro.version>
+		<gson.version>2.14.0</gson.version>
+		<jakarta.mail-api.version>2.1.5</jakarta.mail-api.version>
+		<jakarta.jms-api.version>3.1.0</jakarta.jms-api.version>
+		<jakarta.validation-api.version>3.1.1</jakarta.validation-api.version>
+		<jakarta.persistence-api.version>3.2.0</jakarta.persistence-api.version>
+		<junit-jupiter.version>6.1.3</junit-jupiter.version>
+		<junit-platform-launcher.version>6.1.3</junit-platform-launcher.version>
+
+		<!-- test dependencies -->
+		<micrometer-tracing.version>1.8.0-SNAPSHOT</micrometer-tracing.version>
+
+		<xstream.version>1.4.21</xstream.version>
+		<junit.version>4.13.2</junit.version>
+		<junit-vintage-engine.version>${junit-jupiter.version}</junit-vintage-engine.version>
+		<hamcrest.version>3.0</hamcrest.version>
+		<assertj.version>3.27.7</assertj.version>
+		<mockito.version>5.23.0</mockito.version>
+		<xmlunit.version>2.13.0</xmlunit.version>
+		<commons-io.version>2.22.0</commons-io.version>
+		<commons-dbcp2.version>2.14.0</commons-dbcp2.version>
+		<mongodb-driver.version>5.11.1</mongodb-driver.version>
+		<hsqldb.version>2.7.4</hsqldb.version>
+		<h2.version>2.5.250</h2.version>
+		<sqlite.version>3.53.4.0</sqlite.version>
+		<derby.version>10.16.1.1</derby.version> <!-- TODO deprecated, remove in 7.0 -->
+		<hana.version>2.30.7</hana.version>
+		<artemis.version>2.57.0</artemis.version>
+		<jaxb-core.version>4.0.9</jaxb-core.version>
+		<log4j.version>2.26.1</log4j.version>
+		<hibernate-core.version>7.4.8.Final</hibernate-core.version>
+		<hibernate-validator.version>9.1.3.Final</hibernate-validator.version>
+		<jakarta.el-api.version>6.0.1</jakarta.el-api.version>
+		<jakarta.el.version>4.0.2</jakarta.el.version>
+		<jakarta.transaction-api.version>2.0.1</jakarta.transaction-api.version>
+		<jakarta.xml.bind-api.version>4.0.5</jakarta.xml.bind-api.version>
+		<angus-mail.version>2.0.5</angus-mail.version>
+		<woodstox-core.version>7.2.2</woodstox-core.version>
+		<aspectj.version>1.9.25.1</aspectj.version>
+		<mysql-connector-j.version>9.7.0</mysql-connector-j.version>
+		<mariadb-java-client.version>3.5.10</mariadb-java-client.version>
+		<postgresql.version>42.7.13</postgresql.version>
+		<db2.version>12.1.5.0</db2.version>
+		<oracle.version>19.32.0.0</oracle.version>
+		<sqlserver.version>11.2.3.jre17</sqlserver.version>
+		<jtds.version>1.3.1</jtds.version>
+		<testcontainers.version>2.0.5</testcontainers.version>
+		<testcontainers-redis.version>2.2.4</testcontainers-redis.version>
+		<jsonassert.version>1.5.3</jsonassert.version>
+		<groovy-jsr223.version>5.1.2</groovy-jsr223.version>
+		<nashorn.version>15.7</nashorn.version>
+		<beanshell.version>2.0b6</beanshell.version>
+		<jruby.version>10.1.1.0</jruby.version>
+		<lettuce.version>7.7.0.RELEASE</lettuce.version>
+		<jedis.version>8.0.1</jedis.version>
+
+		<!-- samples dependencies -->
+		<spring-rabbit.version>${spring-amqp.version}</spring-rabbit.version>
+		<quartz.version>2.5.2</quartz.version>
+		<prometheus-metrics-exporter-pushgateway.version>1.4.2</prometheus-metrics-exporter-pushgateway.version>
+		<groovy.version>5.1.2</groovy.version>
+		<logback.version>1.6.3</logback.version>
+
+		<!-- documentation dependencies -->
+		<io.spring.maven.antora.version>0.0.4</io.spring.maven.antora.version>
+		<antora-maven-plugin.version>1.0.0-alpha.5</antora-maven-plugin.version>
+
+		<!-- plugin versions -->
+		<maven-compiler-plugin.version>3.16.0</maven-compiler-plugin.version>
+		<maven-surefire-plugin.version>3.6.0</maven-surefire-plugin.version>
+		<maven-failsafe-plugin.version>3.6.0</maven-failsafe-plugin.version>
+		<maven-javadoc-plugin.version>3.12.0</maven-javadoc-plugin.version>
+		<maven-source-plugin.version>3.4.0</maven-source-plugin.version>
+		<flatten-maven-plugin.version>1.8.0</flatten-maven-plugin.version>
+		<maven-deploy-plugin.version>3.2.0</maven-deploy-plugin.version>
+		<maven-jar-plugin.version>3.5.1</maven-jar-plugin.version>
+		<spring-javaformat-maven-plugin.version>0.0.47</spring-javaformat-maven-plugin.version>
+		<error-prone.version>2.50.0</error-prone.version>
+		<nullaway.version>0.14.2</nullaway.version>
+	</properties>
+
+	<dependencyManagement>
+		<dependencies>
+			<dependency>
+				<groupId>org.springframework</groupId>
+				<artifactId>spring-framework-bom</artifactId>
+				<version>${spring-framework.version}</version>
+				<type>pom</type>
+				<scope>import</scope>
+			</dependency>
+			<dependency>
+				<groupId>org.springframework.data</groupId>
+				<artifactId>spring-data-bom</artifactId>
+				<version>${spring-data-bom.version}</version>
+				<type>pom</type>
+				<scope>import</scope>
+			</dependency>
+			<dependency>
+				<groupId>io.micrometer</groupId>
+				<artifactId>micrometer-bom</artifactId>
+				<version>${micrometer.version}</version>
+				<type>pom</type>
+				<scope>import</scope>
+			</dependency>
+			<dependency>
+				<groupId>io.micrometer</groupId>
+				<artifactId>micrometer-tracing-bom</artifactId>
+				<version>${micrometer-tracing.version}</version>
+				<type>pom</type>
+				<scope>import</scope>
+			</dependency>
+		</dependencies>
+	</dependencyManagement>
+
+	<build>
+		<plugins>
+			<plugin>
+				<groupId>io.spring.javaformat</groupId>
+				<artifactId>spring-javaformat-maven-plugin</artifactId>
+				<version>${spring-javaformat-maven-plugin.version}</version>
+				<executions>
+					<execution>
+						<phase>validate</phase>
+						<inherited>true</inherited>
+						<goals>
+							<goal>validate</goal>
+						</goals>
+					</execution>
+				</executions>
+			</plugin>
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-compiler-plugin</artifactId>
+				<version>${maven-compiler-plugin.version}</version>
+				<configuration>
+					<release>${java.version}</release>
+					<compilerArgs>
+						<compilerArg>-parameters</compilerArg>
+						<!-- https://errorprone.info/docs/installation#maven -->
+						<compilerArg>-XDcompilePolicy=simple</compilerArg>
+						<compilerArg>--should-stop=ifError=FLOW</compilerArg>
+						<compilerArg>
+							-Xplugin:ErrorProne
+							<!-- Check JSpecify annotations -->
+							-Xep:NullAway:ERROR
+							-XepOpt:NullAway:JSpecifyMode=true
+							-XepOpt:NullAway:OnlyNullMarked
+							-XepOpt:NullAway:SuppressionNameAliases=DataFlowIssue
+							<!-- https://github.com/uber/NullAway/issues/162 -->
+							-XepExcludedPaths:.*/src/test/java/.*
+						</compilerArg>
+					</compilerArgs>
+					<annotationProcessorPaths>
+						<path>
+							<groupId>com.google.errorprone</groupId>
+							<artifactId>error_prone_core</artifactId>
+							<version>${error-prone.version}</version>
+						</path>
+						<path>
+							<groupId>com.uber.nullaway</groupId>
+							<artifactId>nullaway</artifactId>
+							<version>${nullaway.version}</version>
+						</path>
+					</annotationProcessorPaths>
+				</configuration>
+			</plugin>
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-surefire-plugin</artifactId>
+				<version>${maven-surefire-plugin.version}</version>
+				<configuration>
+					<argLine>${surefireArgLine}</argLine>
+					<excludes>
+						<exclude>**/*IntegrationTests.java</exclude>
+						<exclude>**/*FunctionalTests.java</exclude>
+					</excludes>
+				</configuration>
+			</plugin>
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-failsafe-plugin</artifactId>
+				<version>${maven-failsafe-plugin.version}</version>
+				<configuration>
+					<includes>
+						<include>**/*IntegrationTests.java</include>
+						<include>**/*FunctionalTests.java</include>
+					</includes>
+				</configuration>
+				<executions>
+					<execution>
+						<goals>
+							<goal>integration-test</goal>
+							<goal>verify</goal>
+						</goals>
+					</execution>
+				</executions>
+			</plugin>
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-jar-plugin</artifactId>
+				<version>${maven-jar-plugin.version}</version>
+				<configuration>
+					<archive>
+						<manifestEntries>
+							<Implementation-Title>${project.artifactId}</Implementation-Title>
+							<Implementation-Version>${project.version}</Implementation-Version>
+							<Automatic-Module-Name>${module.name}</Automatic-Module-Name>
+						</manifestEntries>
+					</archive>
+				</configuration>
+			</plugin>
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-javadoc-plugin</artifactId>
+				<version>${maven-javadoc-plugin.version}</version>
+				<configuration>
+					<excludePackageNames>
+						org.springframework.batch.samples.*
+					</excludePackageNames>
+					<overview>${project.basedir}/spring-batch-docs/src/main/javadoc/overview.html</overview>
+					<detectJavaApiLink>false</detectJavaApiLink>
+					<doclint>all,-missing</doclint>
+					<quiet>true</quiet>
+				</configuration>
+				<executions>
+					<execution>
+						<id>generate-javadocs</id>
+						<phase>package</phase>
+						<goals>
+							<goal>jar</goal>
+						</goals>
+						<configuration>
+							<sourcepath>src/main/java</sourcepath>
+						</configuration>
+					</execution>
+				</executions>
+			</plugin>
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-source-plugin</artifactId>
+				<version>${maven-source-plugin.version}</version>
+				<executions>
+					<execution>
+						<id>generate-sources</id>
+						<phase>package</phase>
+						<goals>
+							<goal>jar</goal>
+						</goals>
+					</execution>
+				</executions>
+			</plugin>
+			<plugin>
+				<groupId>org.codehaus.mojo</groupId>
+				<artifactId>flatten-maven-plugin</artifactId>
+				<version>${flatten-maven-plugin.version}</version>
+				<executions>
+					<execution>
+						<id>flatten</id>
+						<phase>process-resources</phase>
+						<goals>
+							<goal>flatten</goal>
+						</goals>
+						<configuration>
+							<updatePomFile>true</updatePomFile>
+							<flattenMode>ossrh</flattenMode>
+							<pomElements>
+								<distributionManagement>remove</distributionManagement>
+								<dependencyManagement>resolve</dependencyManagement>
+								<repositories>remove</repositories>
+								<scm>keep</scm>
+								<url>keep</url>
+								<organization>resolve</organization>
+							</pomElements>
+						</configuration>
+					</execution>
+					<execution>
+						<id>clean</id>
+						<phase>clean</phase>
+						<goals>
+							<goal>clean</goal>
+						</goals>
+					</execution>
+				</executions>
+			</plugin>
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-deploy-plugin</artifactId>
+				<version>${maven-deploy-plugin.version}</version>
+			</plugin>
+		</plugins>
+	</build>
+
+	<repositories>
+		<repository>
+			<id>maven-central</id>
+			<url>https://repo.maven.apache.org/maven2/</url>
+			<snapshots>
+				<enabled>false</enabled>
+			</snapshots>
+			<releases>
+				<enabled>true</enabled>
+			</releases>
+		</repository>
+		<repository>
+			<id>spring-snapshots</id>
+			<name>Spring Snapshots</name>
+			<url>https://repo.spring.io/snapshot</url>
+			<snapshots>
+				<enabled>true</enabled>
+			</snapshots>
+			<releases>
+				<enabled>false</enabled>
+			</releases>
+		</repository>
+	</repositories>
+
+	<developers>
+		<developer>
+			<id>dsyer</id>
+			<name>Dave Syer</name>
+			<email>dsyer@vmware.com</email>
+		</developer>
+		<developer>
+			<id>nebhale</id>
+			<name>Ben Hale</name>
+			<email>bhale@vmware.com</email>
+		</developer>
+		<developer>
+			<id>lward</id>
+			<name>Lucas Ward</name>
+		</developer>
+		<developer>
+			<id>robokaso</id>
+			<name>Robert Kasanicky</name>
+			<email>robokaso@gmail.com</email>
+		</developer>
+		<developer>
+			<id>trisberg</id>
+			<name>Thomas Risberg</name>
+			<email>trisberg@vmware.com</email>
+		</developer>
+		<developer>
+			<id>dhgarrette</id>
+			<name>Dan Garrette</name>
+			<email>dhgarrette@gmail.com</email>
+		</developer>
+		<developer>
+			<id>mminella</id>
+			<name>Michael Minella</name>
+			<email>mminella@vmware.com</email>
+		</developer>
+		<developer>
+			<id>chrisjs</id>
+			<name>Chris Schaefer</name>
+			<email>cschaefer@vmware.com</email>
+		</developer>
+		<developer>
+			<id>fmbenhassine</id>
+			<name>Mahmoud Ben Hassine</name>
+			<email>mahmoud.ben-hassine@broadcom.com</email>
+			<roles>
+				<role>Project Lead</role>
+			</roles>
+		</developer>
+	</developers>
+
+</project>

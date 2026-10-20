@@ -1,0 +1,257 @@
+/*
+ * Copyright 2025-2026 the original author or authors.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package org.springframework.batch.core.launch.support;
+
+import java.util.List;
+import java.util.Properties;
+
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
+
+import org.springframework.batch.core.BatchStatus;
+import org.springframework.batch.core.configuration.JobRegistry;
+import org.springframework.batch.core.converter.JobParametersConverter;
+import org.springframework.batch.core.job.Job;
+import org.springframework.batch.core.job.JobExecution;
+import org.springframework.batch.core.job.parameters.JobParameters;
+import org.springframework.batch.core.launch.JobOperator;
+import org.springframework.batch.core.repository.JobRepository;
+
+import static org.mockito.Mockito.mock;
+import static org.springframework.batch.core.launch.support.ExitCodeMapper.JVM_EXITCODE_GENERIC_ERROR;
+
+/**
+ * Tests for {@link CommandLineJobOperator}.
+ *
+ * @author Mahmoud Ben Hassine
+ * @author Yejeong Ham
+ * @author Cheolhwan Ihn
+ */
+class CommandLineJobOperatorTests {
+
+	private final JobOperator jobOperator = mock();
+
+	private final JobRepository jobRepository = mock();
+
+	private final JobRegistry jobRegistry = mock();
+
+	private final JobParametersConverter jobParametersConverter = mock();
+
+	private final ExitCodeMapper exitCodeMapper = mock();
+
+	private CommandLineJobOperator commandLineJobOperator;
+
+	@BeforeEach
+	void setUp() {
+		commandLineJobOperator = new CommandLineJobOperator(jobOperator, jobRepository, jobRegistry);
+		commandLineJobOperator.setJobParametersConverter(jobParametersConverter);
+		commandLineJobOperator.setExitCodeMapper(exitCodeMapper);
+	}
+
+	@Test
+	void start() throws Exception {
+		// given
+		String jobName = "job";
+		Properties parameters = new Properties();
+		Job job = mock();
+		JobParameters jobParameters = mock();
+
+		// when
+		Mockito.when(jobRegistry.getJob(jobName)).thenReturn(job);
+		Mockito.when(jobParametersConverter.getJobParameters(parameters)).thenReturn(jobParameters);
+		this.commandLineJobOperator.start(jobName, parameters);
+
+		// then
+		Mockito.verify(jobRegistry).getJob(jobName);
+		Mockito.verify(jobParametersConverter).getJobParameters(parameters);
+		Mockito.verify(jobOperator).start(job, jobParameters);
+	}
+
+	@Test
+	void startNextInstance() throws Exception {
+		// given
+		String jobName = "job";
+		Job job = mock();
+
+		// when
+		Mockito.when(jobRegistry.getJob(jobName)).thenReturn(job);
+		this.commandLineJobOperator.startNextInstance(jobName);
+
+		// then
+		Mockito.verify(jobRegistry).getJob(jobName);
+		Mockito.verify(jobOperator).startNextInstance(job);
+	}
+
+	@Test
+	void stop() throws Exception {
+		// given
+		long jobExecutionId = 1;
+		JobExecution jobExecution = mock();
+
+		// when
+		Mockito.when(jobRepository.getJobExecution(jobExecutionId)).thenReturn(jobExecution);
+		this.commandLineJobOperator.stop(jobExecutionId);
+
+		// then
+		Mockito.verify(jobOperator).stop(jobExecution);
+	}
+
+	@Test
+	void restart() throws Exception {
+		// given
+		long jobExecutionId = 1;
+		JobExecution jobExecution = mock();
+		Mockito.when(jobExecution.getStatus()).thenReturn(BatchStatus.FAILED);
+
+		// when
+		Mockito.when(jobRepository.getJobExecution(jobExecutionId)).thenReturn(jobExecution);
+		this.commandLineJobOperator.restart(jobExecutionId);
+
+		// then
+		Mockito.verify(jobOperator).restart(jobExecution);
+	}
+
+	@Test
+	void restartJobExecutionStopped() throws Exception {
+		// given
+		long jobExecutionId = 1;
+		JobExecution jobExecution = mock();
+		Mockito.when(jobExecution.getStatus()).thenReturn(BatchStatus.STOPPED);
+		Mockito.when(jobRepository.getJobExecution(jobExecutionId)).thenReturn(jobExecution);
+
+		// when
+		this.commandLineJobOperator.restart(jobExecutionId);
+
+		// then
+		Mockito.verify(jobOperator).restart(jobExecution);
+	}
+
+	@Test
+	void restartJobExecutionNotFailed() throws Exception {
+		// given
+		long jobExecutionId = 1;
+		JobExecution jobExecution = mock();
+		Mockito.when(jobExecution.getStatus()).thenReturn(BatchStatus.COMPLETED);
+		Mockito.when(jobRepository.getJobExecution(jobExecutionId)).thenReturn(jobExecution);
+
+		// when
+		int exitCode = this.commandLineJobOperator.restart(jobExecutionId);
+
+		// then
+		Assertions.assertEquals(JVM_EXITCODE_GENERIC_ERROR, exitCode);
+		Mockito.verify(jobOperator, Mockito.never()).restart(jobExecution);
+	}
+
+	@Test
+	void abandon() throws Exception {
+		// given
+		long jobExecutionId = 1;
+		JobExecution jobExecution = mock();
+		Mockito.when(jobExecution.getStatus()).thenReturn(BatchStatus.STOPPED);
+		Mockito.when(jobRepository.getJobExecution(jobExecutionId)).thenReturn(jobExecution);
+
+		// when
+		this.commandLineJobOperator.abandon(jobExecutionId);
+
+		// then
+		Mockito.verify(jobOperator).abandon(jobExecution);
+	}
+
+	@Test
+	void abandonJobExecutionNotStopped() throws Exception {
+		// given
+		long jobExecutionId = 1;
+		JobExecution jobExecution = mock();
+		Mockito.when(jobExecution.getStatus()).thenReturn(BatchStatus.COMPLETED);
+		Mockito.when(jobRepository.getJobExecution(jobExecutionId)).thenReturn(jobExecution);
+
+		// when
+		int exitCode = this.commandLineJobOperator.abandon(jobExecutionId);
+
+		// then
+		Assertions.assertEquals(ExitCodeMapper.JVM_EXITCODE_GENERIC_ERROR, exitCode); // JVM_EXITCODE_GENERIC_ERROR
+		Mockito.verify(jobOperator, Mockito.never()).abandon(jobExecution);
+	}
+
+	@Test
+	void parseWithParameterContainingEqualsSign() {
+		// given
+		List<String> jobParameters = List.of("url=http://example.com?id=123");
+
+		// when
+		Properties properties = CommandLineJobOperator.parse(jobParameters);
+
+		// then
+		Assertions.assertEquals(1, properties.size());
+		Assertions.assertEquals("http://example.com?id=123", properties.get("url"));
+	}
+
+	@Test
+	void parseWithMultipleParameters() {
+		// given
+		List<String> jobParameters = List.of("name=test", "count=10");
+
+		// when
+		Properties properties = CommandLineJobOperator.parse(jobParameters);
+
+		// then
+		Assertions.assertEquals(2, properties.size());
+		Assertions.assertEquals("test", properties.get("name"));
+		Assertions.assertEquals("10", properties.get("count"));
+	}
+
+	@Test
+	void parseWithParameterContainingMultipleEqualsSign() {
+		// given
+		List<String> jobParameters = List.of("url=http://example.com?id=123&name=test");
+
+		// when
+		Properties properties = CommandLineJobOperator.parse(jobParameters);
+
+		// then
+		Assertions.assertEquals(1, properties.size());
+		Assertions.assertEquals("http://example.com?id=123&name=test", properties.get("url"));
+	}
+
+	@Test
+	void parseWithInvalidParameter() {
+		// given
+		List<String> jobParameters = List.of("invalidParam");
+
+		// when
+		Properties properties = CommandLineJobOperator.parse(jobParameters);
+
+		// then
+		Assertions.assertTrue(properties.isEmpty());
+	}
+
+	@Test
+	void recover() {
+		// given
+		long jobExecutionId = 1;
+		JobExecution jobExecution = mock();
+
+		// when
+		Mockito.when(jobRepository.getJobExecution(jobExecutionId)).thenReturn(jobExecution);
+		this.commandLineJobOperator.recover(jobExecutionId);
+
+		// then
+		Mockito.verify(jobOperator).recover(jobExecution);
+	}
+
+}

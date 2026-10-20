@@ -1,0 +1,214 @@
+[[advancedMetaData]]
+= Advanced Metadata Usage
+
+
+[[jobregistry]]
+== JobRegistry
+
+A `JobRegistry` is used to track which jobs are available in the context and can be operated by
+the `JobOperator`. It is also useful for collecting jobs centrally in an application context when
+they have been created elsewhere (for example, in child contexts). You can also use custom `JobRegistry`
+implementations to manipulate the names and other properties of the jobs that are registered.
+There is only one implementation provided by the framework and this is based on a simple
+map from job name to job instance, the `MapJobregistry`.
+
+[tabs]
+====
+Java::
++
+When using `@EnableBatchProcessing`, a `MapJobregistry` is provided for you.
+The following example shows how to configure your own `JobRegistry`:
++
+[source, java]
+----
+...
+@Bean
+public JobRegistry jobRegistry() throws Exception {
+	return new MyCustomJobRegistry();
+}
+...
+----
+
+XML::
++
+The following example shows how to include a `JobRegistry` for a job defined in XML:
++
+[source, xml]
+----
+<bean id="jobRegistry" class="org.springframework.batch.core.configuration.support.MapJobRegistry" />
+----
+
+====
+
+The `MapJobRegistry` provided by Spring Batch is smart enough to populate itself with all the jobs
+in the application context. However, if you are using a custom implementation of `JobRegistry`, you
+need to populate it manually with the jobs that you want to operate through the job operator.
+
+[[JobParametersIncrementer]]
+== JobParametersIncrementer
+
+Most of the methods on `JobOperator` are
+self-explanatory, and you can find more detailed explanations in the
+https://docs.spring.io/spring-batch/reference/api/org/springframework/batch/core/launch/JobOperator.html[Javadoc of the interface]. However, the
+`startNextInstance` method is worth noting. This
+method always starts a new instance of a `Job`.
+This can be extremely useful if there are serious issues in a
+`JobExecution` and the `Job`
+needs to be started over again from the beginning. Unlike
+`JobLauncher` (which requires a new
+`JobParameters` object that triggers a new
+`JobInstance`), if the parameters are different from
+any previous set of parameters, the
+`startNextInstance` method uses the
+`JobParametersIncrementer` tied to the
+`Job` to force the `Job` to a
+new instance:
+
+[source, java]
+----
+public interface JobParametersIncrementer {
+
+    JobParameters getNext(JobParameters parameters);
+
+}
+----
+
+The contract of `JobParametersIncrementer` is
+that, given a xref:domain.adoc#jobParameters[JobParameters]
+object, it returns the "`next`" `JobParameters`
+object by incrementing any necessary values it may contain. This
+strategy is useful because the framework has no way of knowing what
+changes to the `JobParameters` make it the "`next`"
+instance. For example, if the only value in
+`JobParameters` is a date and the next instance
+should be created, should that value be incremented by one day or one
+week (if the job is weekly, for instance)? The same can be said for any
+numerical values that help to identify the `Job`,
+as the following example shows:
+
+[source, java]
+----
+public class SampleIncrementer implements JobParametersIncrementer {
+
+    public JobParameters getNext(JobParameters parameters) {
+        if (parameters==null || parameters.isEmpty()) {
+            return new JobParametersBuilder().addLong("run.id", 1L).toJobParameters();
+        }
+        long id = parameters.getLong("run.id",1L) + 1;
+        return new JobParametersBuilder().addLong("run.id", id).toJobParameters();
+    }
+}
+----
+
+In this example, the value with a key of `run.id` is used to
+discriminate between `JobInstances`. If the
+`JobParameters` passed in is null, it can be
+assumed that the `Job` has never been run before
+and, thus, its initial state can be returned. However, if not, the old
+value is obtained, incremented by one, and returned.
+
+
+[tabs]
+====
+Java::
++
+For jobs defined in Java, you can associate an incrementer with a `Job` through the
+`incrementer` method provided in the builders, as follows:
++
+[source, java]
+----
+@Bean
+public Job footballJob(JobRepository jobRepository) {
+    return new JobBuilder("footballJob", jobRepository)
+    				 .incrementer(sampleIncrementer())
+    				 ...
+                     .build();
+}
+----
+
+XML::
++
+For jobs defined in XML, you can associate an incrementer with a `Job` through the
+`incrementer` attribute in the namespace, as follows:
++
+[source, xml]
+----
+<job id="footballJob" incrementer="sampleIncrementer">
+    ...
+</job>
+----
+====
+
+[[stoppingAJob]]
+== Stopping a Job
+
+One of the most common use cases of
+`JobOperator` is gracefully stopping a
+Job:
+
+[source, java]
+----
+Set<Long> executions = jobOperator.getRunningExecutions("sampleJob");
+jobOperator.stop(executions.iterator().next());
+----
+
+The shutdown is not immediate, since there is no way to force
+immediate shutdown, especially if the execution is currently in
+developer code that the framework has no control over, such as a
+business service. However, as soon as control is returned back to the
+framework, it sets the status of the current
+`StepExecution` to
+`BatchStatus.STOPPED`, saves it, and does the same
+for the `JobExecution` before finishing.
+
+[[graceful-shutdown]]
+== Handling external interruption signals
+
+As of v6.0+, Spring Batch provides a `JobExecutionShutdownHook` that you can attach to the JVM runtime
+in order to intercept external interruption signals and gracefully stop the job execution:
+
+[source, java]
+----
+Thread springBatchHook = new JobExecutionShutdownHook(jobExecution, jobOperator);
+Runtime.getRuntime().addShutdownHook(springBatchHook);
+----
+
+A `JobExecutionShutdownHook` requires the job execution to track as well as a reference to a job operator
+that will be used to stop the execution.
+
+[[recover-job]]
+== Recovering a job
+
+If a graceful shutdown is not performed properly (ie the JVM is shutdown abruptly), Spring Batch will not
+have a chance to update the execution state correctly in order to restart the failed job execution. In this
+case, the job execution will stay in a `STARTED` state which is not restartable. In this case, it is possible
+to recover such a job execution with the `JobOperator` API:
+
+[source, java]
+----
+JobExecution jobExecution = ...; // get the job execution to recover
+jobOperator.recover(jobExecution);
+jobOperator.restart(jobExecution);
+----
+
+[[aborting-a-job]]
+== Aborting a Job
+
+A job execution that is `FAILED` can be
+restarted (if the `Job` is restartable). A job execution whose status is
+`ABANDONED` cannot be restarted by the framework.
+The `ABANDONED` status is also used in step
+executions to mark them as skippable in a restarted job execution. If a
+job is running and encounters a step that has been marked
+`ABANDONED` in the previous failed job execution, it
+moves on to the next step (as determined by the job flow definition
+and the step execution exit status).
+
+If the process died (`kill -9` or server
+failure), the job is, of course, not running, but the `JobRepository` has
+no way of knowing because no one told it before the process died. You
+have to tell it manually that you know that the execution either failed
+or should be considered aborted (change its status to
+`FAILED` or `ABANDONED`). This is
+a business decision, and there is no way to automate it. Change the
+status to `FAILED` only if it is restartable and you know that the restart data is valid.

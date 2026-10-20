@@ -1,0 +1,425 @@
+/*
+ * Copyright 2006-2025 the original author or authors.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.springframework.batch.integration.chunk;
+
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.List;
+import java.util.Queue;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
+import org.jspecify.annotations.NullUnmarked;
+
+import org.springframework.batch.core.BatchStatus;
+import org.springframework.batch.core.ExitStatus;
+import org.springframework.batch.core.step.StepContribution;
+import org.springframework.batch.core.step.StepExecution;
+import org.springframework.batch.core.listener.StepExecutionListener;
+import org.springframework.batch.infrastructure.item.Chunk;
+import org.springframework.batch.infrastructure.item.ExecutionContext;
+import org.springframework.batch.infrastructure.item.ItemStream;
+import org.springframework.batch.infrastructure.item.ItemStreamException;
+import org.springframework.batch.infrastructure.item.ItemWriter;
+import org.springframework.integration.core.MessagingTemplate;
+import org.springframework.messaging.Message;
+import org.springframework.messaging.SubscribableChannel;
+import org.springframework.messaging.support.GenericMessage;
+
+@NullUnmarked
+public class ChunkMessageChannelItemWriter<T>
+		implements StepExecutionListener, ItemWriter<T>, ItemStream, StepContributionSource {
+
+	private static final Log logger = LogFactory.getLog(ChunkMessageChannelItemWriter.class);
+
+	static final String ACTUAL = ChunkMessageChannelItemWriter.class.getName() + ".ACTUAL";
+
+	static final String EXPECTED = ChunkMessageChannelItemWriter.class.getName() + ".EXPECTED";
+
+	protected static final long DEFAULT_THROTTLE_LIMIT = 6;
+
+	protected MessagingTemplate messagingGateway;
+
+	protected final LocalState localState = new LocalState();
+
+	protected long throttleLimit = DEFAULT_THROTTLE_LIMIT;
+
+	protected final int DEFAULT_MAX_WAIT_TIMEOUTS = 40;
+
+	protected int maxWaitTimeouts = DEFAULT_MAX_WAIT_TIMEOUTS;
+
+	protected SubscribableChannel replyChannel;
+
+	/**
+	 * Routes replies arriving on {@link #replyChannel} to whichever job instance they
+	 * belong to.
+	 */
+	private ReplyRouter replyRouter;
+
+	/**
+	 * The maximum number of times to wait at the end of a step for a non-null result from
+	 * the remote workers. This is a multiplier on the receive timeout set separately on
+	 * the gateway. The ideal value is a compromise between allowing slow workers time to
+	 * finish, and responsiveness if there is a dead worker. Defaults to 40.
+	 * @param maxWaitTimeouts the maximum number of wait timeouts
+	 */
+	public void setMaxWaitTimeouts(int maxWaitTimeouts) {
+		this.maxWaitTimeouts = maxWaitTimeouts;
+	}
+
+	/**
+	 * Public setter for the throttle limit. This limits the number of pending requests
+	 * for chunk processing to avoid overwhelming the receivers.
+	 * @param throttleLimit the throttle limit to set
+	 */
+	public void setThrottleLimit(long throttleLimit) {
+		this.throttleLimit = throttleLimit;
+	}
+
+	public void setMessagingOperations(MessagingTemplate messagingGateway) {
+		this.messagingGateway = messagingGateway;
+	}
+
+	/**
+	 * The channel on which replies from workers are expected. Must be a
+	 * {@link SubscribableChannel} so that this component can demultiplex replies by job
+	 * instance id instead of blindly dequeuing from a shared, FIFO
+	 * {@link org.springframework.messaging.PollableChannel}, which can hand a reply
+	 * belonging to one job instance to a concurrently running job instance sharing this
+	 * writer.
+	 * @param replyChannel the reply channel to set
+	 */
+	public void setReplyChannel(SubscribableChannel replyChannel) {
+		this.replyChannel = replyChannel;
+		this.replyRouter = ReplyRouter.forChannel(replyChannel);
+	}
+
+	@Override
+	public void write(Chunk<? extends T> items) throws Exception {
+
+		// Block until expecting <= throttle limit
+		while (localState.getExpecting() > throttleLimit) {
+			getNextResult();
+		}
+
+		if (!items.isEmpty()) {
+
+			ChunkRequest<T> request = localState.getRequest(items);
+			if (logger.isDebugEnabled()) {
+				logger.debug("Dispatching chunk: " + request);
+			}
+			messagingGateway.send(new GenericMessage<>(request));
+			localState.incrementExpected();
+
+		}
+
+	}
+
+	@Override
+	public void beforeStep(StepExecution stepExecution) {
+		localState.setStepExecution(stepExecution);
+		// Ensure a queue exists even if no reply has arrived yet; a queue may already
+		// exist and hold replies to a backlog of requests sent before this step
+		// (re)started.
+		this.replyRouter.queueFor(localState.getJobInstanceId());
+	}
+
+	@Override
+	public ExitStatus afterStep(StepExecution stepExecution) {
+		if (!(stepExecution.getStatus() == BatchStatus.COMPLETED)) {
+			return ExitStatus.EXECUTING;
+		}
+		long expecting = localState.getExpecting();
+		boolean timedOut;
+		try {
+			logger.debug("Waiting for results in step listener...");
+			timedOut = !waitForResults();
+			logger.debug("Finished waiting for results in step listener.");
+		}
+		catch (RuntimeException e) {
+			logger.debug("Detected failure waiting for results in step listener.", e);
+			stepExecution.setStatus(BatchStatus.FAILED);
+			return ExitStatus.FAILED.addExitDescription(e.getClass().getName() + ": " + e.getMessage());
+		}
+		finally {
+
+			if (logger.isDebugEnabled()) {
+				logger.debug("Finished waiting for results in step listener.  Still expecting: "
+						+ localState.getExpecting());
+			}
+
+			for (StepContribution contribution : getStepContributions()) {
+				stepExecution.apply(contribution);
+			}
+		}
+		if (timedOut) {
+			stepExecution.setStatus(BatchStatus.FAILED);
+			return ExitStatus.FAILED
+				.addExitDescription("Timed out waiting for " + localState.getExpecting() + " backlog at end of step");
+		}
+		return ExitStatus.COMPLETED.addExitDescription("Waited for " + expecting + " results.");
+	}
+
+	@Override
+	public void close() throws ItemStreamException {
+		this.replyRouter.forget(localState.getJobInstanceId());
+		localState.reset();
+	}
+
+	@Override
+	public void open(ExecutionContext executionContext) throws ItemStreamException {
+		if (executionContext.containsKey(EXPECTED)) {
+			localState.open(executionContext.getInt(EXPECTED), executionContext.getInt(ACTUAL));
+			if (!waitForResults()) {
+				throw new ItemStreamException("Timed out waiting for back log on open");
+			}
+		}
+	}
+
+	@Override
+	public void update(ExecutionContext executionContext) throws ItemStreamException {
+		executionContext.putInt(EXPECTED, localState.expected.intValue());
+		executionContext.putInt(ACTUAL, localState.actual.intValue());
+	}
+
+	@Override
+	public Collection<StepContribution> getStepContributions() {
+		List<StepContribution> contributions = new ArrayList<>();
+		for (ChunkResponse response : localState.pollChunkResponses()) {
+			StepContribution contribution = response.getStepContribution();
+			if (logger.isDebugEnabled()) {
+				logger.debug("Applying: " + response);
+			}
+			contributions.add(contribution);
+		}
+		return contributions;
+	}
+
+	/**
+	 * Wait until all the results that are in the pipeline come back to the reply channel.
+	 * @return true if successfully received a result, false if timed out
+	 */
+	protected boolean waitForResults() throws AsynchronousFailureException {
+		int count = 0;
+		int maxCount = maxWaitTimeouts;
+		Throwable failure = null;
+		if (logger.isInfoEnabled()) {
+			logger.info("Waiting for " + localState.getExpecting() + " results");
+		}
+		while (localState.getExpecting() > 0 && count++ < maxCount) {
+			try {
+				getNextResult();
+			}
+			catch (Throwable t) {
+				logger.error("Detected error in remote result. Trying to recover " + localState.getExpecting()
+						+ " outstanding results before completing.", t);
+				failure = t;
+			}
+		}
+		if (failure != null) {
+			throw wrapIfNecessary(failure);
+		}
+		return count < maxCount;
+	}
+
+	/**
+	 * Get the next result if it is available (within the timeout specified in the
+	 * gateway), otherwise do nothing.
+	 * @throws AsynchronousFailureException If there is a response and it contains a
+	 * failed chunk response.
+	 */
+	protected void getNextResult() throws AsynchronousFailureException {
+		BlockingQueue<Message<ChunkResponse>> queue = this.replyRouter.queueFor(localState.getJobInstanceId());
+		long receiveTimeout = messagingGateway.getReceiveTimeout();
+		Message<ChunkResponse> message;
+		try {
+			message = receiveTimeout >= 0 ? queue.poll(receiveTimeout, TimeUnit.MILLISECONDS) : queue.take();
+		}
+		catch (InterruptedException e) {
+			Thread.currentThread().interrupt();
+			throw new IllegalStateException("Interrupted while waiting for a chunk response", e);
+		}
+		if (message != null) {
+			ChunkResponse payload = message.getPayload();
+			if (logger.isDebugEnabled()) {
+				logger.debug("Found result: " + payload);
+			}
+			if (payload.isRedelivered()) {
+				logger.warn(
+						"Redelivered result detected, which may indicate stale state. In the best case, we just picked up a timed out message "
+								+ "from a previous failed execution. In the worst case (and if this is not a restart), "
+								+ "the step may now timeout.  In that case if you believe that all messages "
+								+ "from workers have been sent, the business state "
+								+ "is probably inconsistent, and the step will fail.");
+				localState.incrementRedelivered();
+			}
+			localState.pushResponse(payload);
+			localState.incrementActual();
+			if (!payload.isSuccessful()) {
+				throw new AsynchronousFailureException(
+						"Failure or interrupt detected in handler: " + payload.getMessage());
+			}
+		}
+	}
+
+	/**
+	 * Re-throws the original throwable if it is unchecked, wraps checked exceptions into
+	 * {@link AsynchronousFailureException}.
+	 */
+	protected static AsynchronousFailureException wrapIfNecessary(Throwable throwable) {
+		if (throwable instanceof Error error) {
+			throw error;
+		}
+		else if (throwable instanceof AsynchronousFailureException exception) {
+			return exception;
+		}
+		else {
+			return new AsynchronousFailureException("Exception in remote process", throwable);
+		}
+	}
+
+	protected static class LocalState {
+
+		private final AtomicInteger current = new AtomicInteger(-1);
+
+		private final AtomicInteger actual = new AtomicInteger();
+
+		private final AtomicInteger expected = new AtomicInteger();
+
+		private final AtomicInteger redelivered = new AtomicInteger();
+
+		private StepExecution stepExecution;
+
+		private final Queue<ChunkResponse> contributions = new LinkedBlockingQueue<>();
+
+		public int getExpecting() {
+			return expected.get() - actual.get();
+		}
+
+		public <T> ChunkRequest<T> getRequest(Chunk<? extends T> items) {
+			return new ChunkRequest<>(current.incrementAndGet(), items, getJobInstanceId(), createStepContribution());
+		}
+
+		public void open(int expectedValue, int actualValue) {
+			actual.set(actualValue);
+			expected.set(expectedValue);
+		}
+
+		public Collection<ChunkResponse> pollChunkResponses() {
+			Collection<ChunkResponse> set = new ArrayList<>();
+			synchronized (contributions) {
+				ChunkResponse item = contributions.poll();
+				while (item != null) {
+					set.add(item);
+					item = contributions.poll();
+				}
+			}
+			return set;
+		}
+
+		public void pushResponse(ChunkResponse stepContribution) {
+			synchronized (contributions) {
+				contributions.add(stepContribution);
+			}
+		}
+
+		public void incrementRedelivered() {
+			redelivered.incrementAndGet();
+		}
+
+		public void incrementActual() {
+			actual.incrementAndGet();
+		}
+
+		public void incrementExpected() {
+			expected.incrementAndGet();
+		}
+
+		public StepContribution createStepContribution() {
+			return stepExecution.createStepContribution();
+		}
+
+		public Long getJobInstanceId() {
+			return stepExecution.getJobExecution().getJobInstance().getId();
+		}
+
+		public void setStepExecution(StepExecution stepExecution) {
+			this.stepExecution = stepExecution;
+		}
+
+		public void reset() {
+			expected.set(0);
+			actual.set(0);
+		}
+
+	}
+
+	/**
+	 * Routes chunk responses arriving on a reply channel to whichever job instance they
+	 * belong to. Exactly one router - and therefore exactly one subscriber - is created
+	 * per distinct reply channel, no matter how many
+	 * {@link ChunkMessageChannelItemWriter} instances use that channel over time (for
+	 * example, step-scoped writers created for successive executions): a
+	 * {@link SubscribableChannel} such as
+	 * {@link org.springframework.integration.channel.DirectChannel} dispatches each
+	 * message to a single subscriber rather than broadcasting, so multiple subscribers
+	 * sharing one channel would not just leak, they would also steal each other's
+	 * messages.
+	 */
+	private static final class ReplyRouter {
+
+		private static final ConcurrentMap<SubscribableChannel, ReplyRouter> ROUTERS_BY_CHANNEL = new ConcurrentHashMap<>();
+
+		private final ConcurrentMap<Long, BlockingQueue<Message<ChunkResponse>>> pendingReplies = new ConcurrentHashMap<>();
+
+		private ReplyRouter(SubscribableChannel channel) {
+			channel.subscribe(this::onReply);
+		}
+
+		static ReplyRouter forChannel(SubscribableChannel channel) {
+			return ROUTERS_BY_CHANNEL.computeIfAbsent(channel, ReplyRouter::new);
+		}
+
+		BlockingQueue<Message<ChunkResponse>> queueFor(Long jobInstanceId) {
+			return this.pendingReplies.computeIfAbsent(jobInstanceId, id -> new LinkedBlockingQueue<>());
+		}
+
+		void forget(Long jobInstanceId) {
+			this.pendingReplies.remove(jobInstanceId);
+		}
+
+		@SuppressWarnings("unchecked")
+		private void onReply(Message<?> message) {
+			ChunkResponse payload = (ChunkResponse) message.getPayload();
+			Long jobInstanceId = payload.getJobInstanceId();
+			if (jobInstanceId != null) {
+				queueFor(jobInstanceId).offer((Message<ChunkResponse>) message);
+			}
+			else if (logger.isWarnEnabled()) {
+				logger.warn("Received a chunk response with no job instance id: " + message);
+			}
+		}
+
+	}
+
+}

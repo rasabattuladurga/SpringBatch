@@ -1,0 +1,158 @@
+/*
+ * Copyright 2006-present the original author or authors.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.springframework.batch.core.repository.dao;
+
+import java.sql.Types;
+
+import org.jspecify.annotations.Nullable;
+
+import org.springframework.batch.core.converter.ConversionServiceFactory;
+import org.springframework.beans.factory.InitializingBean;
+import org.springframework.core.convert.support.ConfigurableConversionService;
+import org.springframework.jdbc.core.JdbcOperations;
+import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.util.Assert;
+import org.springframework.util.StringUtils;
+
+/**
+ * Encapsulates common functionality needed by JDBC batch metadata DAOs - provides
+ * jdbcTemplate for subclasses and handles table prefixes.
+ *
+ * @author Robert Kasanicky
+ * @author Mahmoud Ben Hassine
+ * @author Yanming Zhou
+ */
+public abstract class AbstractJdbcBatchMetadataDao implements InitializingBean {
+
+	/**
+	 * Default value for the table prefix property.
+	 */
+	public static final String DEFAULT_TABLE_PREFIX = "BATCH_";
+
+	/**
+	 * Default name of the job instance incrementer.
+	 */
+	public static final String DEFAULT_JOB_INSTANCE_INCREMENTER_NAME = "JOB_INSTANCE_SEQ";
+
+	/**
+	 * Default name of the job execution incrementer.
+	 */
+	public static final String DEFAULT_JOB_EXECUTION_INCREMENTER_NAME = "JOB_EXECUTION_SEQ";
+
+	/**
+	 * Default name of the step execution incrementer.
+	 */
+	public static final String DEFAULT_STEP_EXECUTION_INCREMENTER_NAME = "STEP_EXECUTION_SEQ";
+
+	public static final int DEFAULT_EXIT_MESSAGE_LENGTH = 2500;
+
+	public static final int DEFAULT_SHORT_CONTEXT_LENGTH = 2500;
+
+	private String tablePrefix = DEFAULT_TABLE_PREFIX;
+
+	private int clobTypeToUse = Types.CLOB;
+
+	private @Nullable JdbcOperations jdbcTemplate;
+
+	private JdbcClient jdbcClient;
+
+	private ConfigurableConversionService conversionService = ConversionServiceFactory.createConversionService();
+
+	/**
+	 * Create a new {@link AbstractJdbcBatchMetadataDao}.
+	 * @param jdbcClient the client to use to interact with the batch metadata tables
+	 * @since 6.1
+	 */
+	protected AbstractJdbcBatchMetadataDao(JdbcClient jdbcClient) {
+		Assert.notNull(jdbcClient, "jdbcClient must not be null");
+		this.jdbcClient = jdbcClient;
+	}
+
+	protected String getQuery(String base) {
+		return StringUtils.replace(base, "%PREFIX%", tablePrefix);
+	}
+
+	protected String getTablePrefix() {
+		return tablePrefix;
+	}
+
+	/**
+	 * Public setter for the table prefix property. This will be prefixed to all the table
+	 * names before queries are executed. Defaults to {@link #DEFAULT_TABLE_PREFIX}.
+	 * @param tablePrefix the tablePrefix to set
+	 */
+	public void setTablePrefix(String tablePrefix) {
+		this.tablePrefix = tablePrefix;
+	}
+
+	/**
+	 * Set the {@link JdbcOperations} to use to interact with the batch metadata tables.
+	 * This also sets the {@link JdbcClient} to a client backed by the given operations.
+	 * @param jdbcTemplate the operations to use
+	 * @deprecated since 6.1 in favor of {@link #AbstractJdbcBatchMetadataDao(JdbcClient)}
+	 */
+	@Deprecated(since = "6.1", forRemoval = true)
+	public void setJdbcTemplate(JdbcOperations jdbcTemplate) {
+		this.jdbcTemplate = jdbcTemplate;
+		this.jdbcClient = JdbcClient.create(jdbcTemplate);
+	}
+
+	/**
+	 * Get the {@link JdbcOperations} to use to interact with the batch metadata tables.
+	 * @return the operations to use, or {@code null} if none was set
+	 * @deprecated since 6.1 in favor of {@link #getJdbcClient()}
+	 */
+	@Deprecated(since = "6.1", forRemoval = true)
+	protected @Nullable JdbcOperations getJdbcTemplate() {
+		return jdbcTemplate;
+	}
+
+	/**
+	 * Get the {@link JdbcClient} to use to interact with the batch metadata tables.
+	 * @return the client to use
+	 * @since 6.1
+	 */
+	protected JdbcClient getJdbcClient() {
+		return jdbcClient;
+	}
+
+	public int getClobTypeToUse() {
+		return clobTypeToUse;
+	}
+
+	public void setClobTypeToUse(int clobTypeToUse) {
+		this.clobTypeToUse = clobTypeToUse;
+	}
+
+	/**
+	 * Set the conversion service to use to convert job parameters from String literals to
+	 * typed values and vice versa.
+	 */
+	public void setConversionService(ConfigurableConversionService conversionService) {
+		Assert.notNull(conversionService, "conversionService must not be null");
+		this.conversionService = conversionService;
+	}
+
+	public ConfigurableConversionService getConversionService() {
+		return conversionService;
+	}
+
+	@Override
+	public void afterPropertiesSet() throws Exception {
+	}
+
+}

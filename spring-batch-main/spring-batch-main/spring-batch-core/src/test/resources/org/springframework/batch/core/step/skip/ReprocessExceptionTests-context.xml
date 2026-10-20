@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+	   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:batch="http://www.springframework.org/schema/batch"
+	   xsi:schemaLocation="http://www.springframework.org/schema/beans https://www.springframework.org/schema/beans/spring-beans.xsd
+	   			http://www.springframework.org/schema/batch https://www.springframework.org/schema/batch/spring-batch.xsd">
+
+	<import resource="classpath:data-source-context.xml" />
+
+	<bean id="jobOperator"
+		  class="org.springframework.batch.core.launch.support.JobOperatorFactoryBean">
+		<property name="jobRepository" ref="jobRepository" />
+	</bean>
+
+	<bean id="reader" class="org.springframework.batch.infrastructure.item.file.FlatFileItemReader">
+		<property name="resource" value="classpath:/data/person.csv"/>
+		<constructor-arg name="lineMapper">
+			<bean class="org.springframework.batch.infrastructure.item.file.mapping.DefaultLineMapper">
+				<property name="lineTokenizer">
+					<bean class="org.springframework.batch.infrastructure.item.file.transform.DelimitedLineTokenizer">
+						<property name="names" value="firstName,lastName"/>
+					</bean>
+				</property>
+				<property name="fieldSetMapper">
+					<bean class="org.springframework.batch.infrastructure.item.file.mapping.BeanWrapperFieldSetMapper">
+						<property name="targetType" value="org.springframework.batch.core.step.skip.ReprocessExceptionTests$Person"/>
+					</bean>
+				</property>
+			</bean>
+		</constructor-arg>
+	</bean>
+
+	<bean id="processor" class="org.springframework.batch.core.step.skip.ReprocessExceptionTests$PersonProcessor"/>
+
+	<bean id="writer" class="org.springframework.batch.core.step.skip.ReprocessExceptionTests$PersonItemWriter"/>
+
+	<job id="job" xmlns="http://www.springframework.org/schema/batch">
+		<step id="step1">
+			<tasklet>
+				<chunk reader="reader" processor="processor" writer="writer" commit-interval="1">
+					<skip-policy>
+						<bean class="org.springframework.batch.core.step.skip.AlwaysSkipItemSkipPolicy" xmlns="http://www.springframework.org/schema/beans"/>
+					</skip-policy>
+				</chunk>
+			</tasklet>
+		</step>
+	</job>
+
+	<batch:job-repository id="jobRepository" table-prefix="BATCH_"/>
+</beans>

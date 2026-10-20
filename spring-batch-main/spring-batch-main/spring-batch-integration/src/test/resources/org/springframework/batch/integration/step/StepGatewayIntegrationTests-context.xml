@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+       xmlns:integration="http://www.springframework.org/schema/integration"
+       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xsi:schemaLocation="http://www.springframework.org/schema/integration https://www.springframework.org/schema/integration/spring-integration.xsd
+		http://www.springframework.org/schema/beans https://www.springframework.org/schema/beans/spring-beans.xsd
+		http://www.springframework.org/schema/batch https://www.springframework.org/schema/batch/spring-batch.xsd">
+
+	<import resource="classpath:/simple-job-launcher-context.xml" />
+
+	<integration:channel id="requests" />
+
+	<job id="job" xmlns="http://www.springframework.org/schema/batch">
+		<step id="step" parent="delegateStep" />
+	</job>
+
+	<bean id="delegateStep" class="org.springframework.batch.integration.step.DelegateStep">
+        <constructor-arg name="jobRepository" ref="jobRepository"/>
+		<property name="delegate" ref="gateway" />
+	</bean>
+
+	<integration:gateway service-interface="org.springframework.batch.core.step.Step" id="gateway"
+                         default-request-channel="requests" />
+
+	<integration:service-activator input-channel="requests" ref="remote" method="execute" />
+
+	<step id="remote" xmlns="http://www.springframework.org/schema/batch">
+		<tasklet ref="tasklet" />
+	</step>
+
+	<bean id="tasklet" class="org.springframework.batch.integration.step.TestTasklet" />
+
+</beans>

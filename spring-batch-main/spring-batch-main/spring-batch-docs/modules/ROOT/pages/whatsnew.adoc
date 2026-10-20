@@ -1,0 +1,411 @@
+[[whatsNew]]
+= What's new in Spring Batch 6.1
+
+This section highlights the major changes in Spring Batch 6.1. For the complete list of changes, please refer to the https://github.com/spring-projects/spring-batch/releases[release notes].
+
+Spring Batch 6.1 includes the following features and improvements:
+
+* xref:whatsnew.adoc#dependencies-upgrade[Dependencies upgrade]
+* xref:whatsnew.adoc#collection-prefix-for-the-mongodb-job-repository[Collection prefix for the MongoDB job repository]
+* xref:whatsnew.adoc#default-conversion-service-based-on-defaultformattingconversionservice[Default conversion service based on `DefaultFormattingConversionService`]
+* xref:whatsnew.adoc#async-processing-apis-and-local-chunking-moved-to-core[Async processing APIs and local chunking moved to `spring-batch-core`]
+* xref:whatsnew.adoc#flushing-support-in-repositoryitemwriter[Flushing support in `RepositoryItemWriter`]
+* xref:whatsnew.adoc#location-patterns-in-multiresourceitemreaderbuilder[Location patterns in `MultiResourceItemReaderBuilder`]
+* xref:whatsnew.adoc#new-resourcesitemreaderbuilder[New `ResourcesItemReaderBuilder`]
+* xref:whatsnew.adoc#schema-locations-in-databasetype[Schema locations in `DatabaseType`]
+* xref:whatsnew.adoc#default-name-for-item-readers-and-writers[Default name for item readers and writers]
+* xref:whatsnew.adoc#compile-time-safety-for-mutually-exclusive-builder-methods[Compile-time safety for mutually exclusive builder methods]
+* xref:whatsnew.adoc#avro-reflection-based-deserialization-now-requires-trusted-classes[Avro reflection-based (de)serialization now requires trusted classes]
+* xref:whatsnew.adoc#jdbc-daos-migrated-to-jdbcclient[JDBC DAOs migrated to `JdbcClient`]
+* xref:whatsnew.adoc#deprecations[Deprecations]
+
+[[dependencies-upgrade]]
+== Dependencies upgrade
+
+In this release, Spring dependencies are upgraded to the following versions:
+
+* Spring Framework 7.1
+* Spring Integration 7.2
+* Spring Data 2026.1.0
+* Spring LDAP 4.1
+* Spring AMQP 4.2
+* Spring Kafka 4.2
+* Micrometer 1.18
+
+[[collection-prefix-for-the-mongodb-job-repository]]
+== Collection prefix for the MongoDB job repository
+
+The MongoDB job repository now supports a configurable collection prefix, similar to the
+table prefix of the JDBC job repository. This makes it possible to run several
+applications against the same MongoDB database, or to isolate environments from each
+other:
+
+[source, java]
+----
+@EnableBatchProcessing
+@EnableMongoJobRepository(collectionPrefix = "MY_APP_")
+class MyJobConfiguration {
+
+	// job definition omitted
+
+}
+----
+
+The prefix defaults to `BATCH_`, so existing applications are not affected. For more
+details, please refer to the
+xref:job/configuring-repository.adoc#repositoryCollectionPrefix[Changing the Collection Prefix]
+section.
+
+[[default-conversion-service-based-on-defaultformattingconversionservice]]
+== Default conversion service based on `DefaultFormattingConversionService`
+
+The job repository and job explorer now build their default `ConfigurableConversionService`
+on top of Spring Framework's `DefaultFormattingConversionService` instead of a set of
+hand-written converters. This is exposed through the new `ConversionServiceFactory`
+utility class:
+
+[source, java]
+----
+ConfigurableConversionService conversionService = ConversionServiceFactory.createConversionService();
+----
+
+The default conversion service keeps the same formats Spring Batch has always used for
+job parameters (`ISO_INSTANT` for `java.util.Date`, and the standard ISO formats for
+`LocalDate`, `LocalTime`, `LocalDateTime`, `ZonedDateTime`, and `OffsetDateTime`), while
+benefiting from the broader set of converters and formatters that
+`DefaultFormattingConversionService` provides out of the box. Existing extension points,
+such as `JdbcDefaultBatchConfiguration#getConversionService()` and the `setConversionService`
+setters on `JobRepositoryFactoryBean`, `JobExplorerFactoryBean`,
+`AbstractJdbcBatchMetadataDao`, and `DefaultJobParametersConverter`, are unaffected and can
+still be used to fully customize job parameter conversion.
+
+As a result, the previous custom converters (`DateToStringConverter`, `StringToDateConverter`,
+`LocalDateToStringConverter`, `StringToLocalDateConverter`, `LocalTimeToStringConverter`,
+`StringToLocalTimeConverter`, `LocalDateTimeToStringConverter`, and
+`StringToLocalDateTimeConverter`) are now deprecated. See the
+xref:whatsnew.adoc#deprecations[Deprecations] section for more details.
+
+[[async-processing-apis-and-local-chunking-moved-to-core]]
+== Async processing APIs and local chunking moved to `spring-batch-core`
+
+`AsyncItemProcessor`, `AsyncItemWriter`, and `ChunkTaskExecutorItemWriter` (used for
+local chunking) have been moved from `spring-batch-integration` to
+`org.springframework.batch.core.step.item` in `spring-batch-core`. These APIs only rely
+on a `TaskExecutor` and have no dependency on Spring Integration, so they no longer need
+to live in the integration module. This lets applications use asynchronous item
+processing and local chunking without pulling in `spring-batch-integration` and its
+transitive dependencies.
+
+This is a packaging change only, and no functional changes are introduced. The classes
+in `spring-batch-integration` are kept as deprecated subclasses of their new counterparts
+in `spring-batch-core` for backward compatibility, and will be removed in a future
+release. Existing applications continue to work as-is, but are encouraged to migrate to
+the new package:
+
+[source, java]
+----
+// before
+import org.springframework.batch.integration.async.AsyncItemProcessor;
+import org.springframework.batch.integration.async.AsyncItemWriter;
+import org.springframework.batch.integration.chunk.ChunkTaskExecutorItemWriter;
+
+// after
+import org.springframework.batch.core.step.item.AsyncItemProcessor;
+import org.springframework.batch.core.step.item.AsyncItemWriter;
+import org.springframework.batch.core.step.item.ChunkTaskExecutorItemWriter;
+----
+
+[[flushing-support-in-repositoryitemwriter]]
+== Flushing support in `RepositoryItemWriter`
+
+`RepositoryItemWriter` now supports flushing the underlying Spring Data repository after
+writing a chunk, in two ways:
+
+* If the repository exposes a single method that both saves and flushes items, such as
+`JpaRepository#saveAllAndFlush(Iterable)`, that method name can be set with
+`setMethodName`. `RepositoryItemWriter` now detects, once at initialization, whether the
+named method accepts an `Iterable` (in which case it is invoked once with the whole
+chunk) or a single item (in which case it is invoked once per item, as before):
+
+[source, java]
+----
+RepositoryItemWriter<Foo> writer = new RepositoryItemWriter<>(jpaRepository);
+writer.setMethodName("saveAllAndFlush");
+----
+
+* If saving and flushing are separate operations, the new `flush` method can be
+overridden in a subclass to flush the repository after the chunk has been written. The
+`repository` field is now `protected` so that subclasses can access it directly:
+
+[source, java]
+----
+public class FlushingRepositoryItemWriter<T> extends RepositoryItemWriter<T> {
+
+	public FlushingRepositoryItemWriter(JpaRepository<T, ?> repository) {
+		super(repository);
+	}
+
+	@Override
+	protected void flush() {
+		((JpaRepository<T, ?>) this.repository).flush();
+	}
+
+}
+----
+
+For more details, please refer to the
+xref:readers-and-writers/item-reader-writer-implementations.adoc#repositoryItemWriter[`RepositoryItemWriter`]
+section.
+
+[[location-patterns-in-multiresourceitemreaderbuilder]]
+== Location patterns in `MultiResourceItemReaderBuilder`
+
+`MultiResourceItemReaderBuilder` now accepts resource location patterns directly, so
+resources no longer need to be resolved and injected before configuring the reader:
+
+[source, java]
+----
+// before
+@Bean
+public MultiResourceItemReader<Foo> multiResourceReader() throws IOException {
+	PathMatchingResourcePatternResolver resourcePatternResolver = new PathMatchingResourcePatternResolver();
+	Resource[] resources = resourcePatternResolver.getResources("classpath:data/input/file-*.txt");
+	return new MultiResourceItemReaderBuilder<Foo>()
+					.delegate(flatFileItemReader())
+					.resources(resources)
+					.build();
+}
+
+// after
+@Bean
+public MultiResourceItemReader<Foo> multiResourceReader() {
+	return new MultiResourceItemReaderBuilder<Foo>()
+					.delegate(flatFileItemReader())
+					.resources("classpath:data/input/file-*.txt")
+					.build();
+}
+----
+
+Each pattern is resolved with a `PathMatchingResourcePatternResolver`, so any resource
+prefix supported by Spring (`file:`, `classpath:`, `classpath*:`, and so on) can be used,
+in addition to Ant-style wildcards (`*`, `**`, and `?`). For more details, please refer to
+the xref:readers-and-writers/multi-file-input.adoc#multiFileInputLocationPatterns[Specifying
+Resources With a Location Pattern] section.
+
+[[new-resourcesitemreaderbuilder]]
+== New `ResourcesItemReaderBuilder`
+
+This release introduces a builder for `ResourcesItemReader`, called `ResourcesItemReaderBuilder`.
+Like `MultiResourceItemReaderBuilder`, it can resolve resources directly from one
+or more location patterns:
+
+[source, java]
+----
+// before
+PathMatchingResourcePatternResolver resourcePatternResolver = new PathMatchingResourcePatternResolver();
+ResourcesItemReader reader = new ResourcesItemReader();
+reader.setResources(resourcePatternResolver.getResources("file:/data/inputs/*.csv"));
+reader.setName("resourcesReader");
+
+// after
+ResourcesItemReader reader = new ResourcesItemReaderBuilder()
+				.resources("file:/data/inputs/*.csv")
+				.name("resourcesReader")
+				.build();
+----
+
+For more details, please refer to the
+xref:readers-and-writers/item-reader-writer-implementations.adoc#resourcesItemReader[`ResourcesItemReader`]
+section.
+
+[[schema-locations-in-databasetype]]
+== Schema locations in `DatabaseType`
+
+`DatabaseType` now exposes the classpath locations of the schema creation and drop
+scripts for each supported database, through the new `getProductSchema()` and
+`getProductSchemaDrop()` methods. This avoids hard-coding these locations (and the risk
+of typos) when configuring a `DataSource` or a `ResourceDatabasePopulator`:
+
+[source, java]
+----
+// before
+new EmbeddedDatabaseBuilder()
+    .addScript("/org/springframework/batch/core/schema-drop-h2.sql")
+    .addScript("/org/springframework/batch/core/schema-h2.sql")
+    .build();
+
+// after
+new EmbeddedDatabaseBuilder()
+    .addScript(DatabaseType.H2.getProductSchemaDrop())
+    .addScript(DatabaseType.H2.getProductSchema())
+    .build();
+----
+
+For more details, please refer to the
+xref:schema-appendix.adoc#exampleDDLScripts[Example DDL Scripts] section.
+
+[[default-name-for-item-readers-and-writers]]
+== Default name for item readers and writers
+
+Builders for item readers and writers that persist their state in the `ExecutionContext`
+(for example `FlatFileItemReaderBuilder`, `JdbcCursorItemReaderBuilder`,
+`JdbcPagingItemReaderBuilder`, `RepositoryItemReaderBuilder`, and others) no longer
+require an explicit name to be set when `saveState` is `true`:
+
+[source, java]
+----
+// before: required an explicit name, or building the reader would fail
+// after: builds successfully, using a default name
+@Bean
+public FlatFileItemReader<Foo> fooReader() {
+    return new FlatFileItemReaderBuilder<Foo>()
+                    .resource(resource)
+                    .delimited()
+                    .names("first", "second", "third")
+                    .targetType(Foo.class)
+                    .build();
+}
+----
+
+This is possible because these readers and writers extend `ItemStreamSupport`, which
+already defaults the name to the short class name and overrides it with the Spring bean
+name when the reader or writer is declared as a bean. The strict name requirement in the
+builders was redundant with this existing behavior. An explicit name is still recommended,
+and required, when the default is not unique enough, such as when two instances of the
+same reader or writer type are used within the same step. For more details, please refer
+to the xref:readers-and-writers/custom.adoc[Custom `ItemReader`s and `ItemWriter`s]
+section.
+
+[[compile-time-safety-for-mutually-exclusive-builder-methods]]
+== Compile-time safety for mutually exclusive builder methods
+
+A few builders exposed pairs of methods that configure mutually exclusive strategies,
+but allowed calling both on the same instance, only failing with an
+`IllegalStateException` when `build()` was called:
+
+* `FlatFileItemReaderBuilder#targetType(Class)` and `#fieldSetMapper(FieldSetMapper)`
+* `FlatFileItemWriterBuilder#delimited()`/`#delimited(Consumer)` and
+  `#formatted()`/`#formatted(Consumer)`
+* `JdbcBatchItemWriterBuilder#columnMapped()` and `#beanMapped()`
+
+These builders now use a staged DSL: calling one of the two methods returns a stage
+that exposes every other configuration method of the builder, except the conflicting
+one, so invalid combinations are now rejected by the compiler instead of at runtime:
+
+[source, java]
+----
+// before: compiles, but throws IllegalStateException at build() time
+new FlatFileItemReaderBuilder<Foo>()
+    .name("fooReader")
+    .resource(resource)
+    .lineTokenizer(tokenizer)
+    .targetType(Foo.class)
+    .fieldSetMapper(fieldSetMapper) // IllegalStateException at build()
+    .build();
+
+// after: fieldSetMapper() is not available once targetType() has been called
+new FlatFileItemReaderBuilder<Foo>()
+    .name("fooReader")
+    .resource(resource)
+    .lineTokenizer(tokenizer)
+    .targetType(Foo.class)
+    .fieldSetMapper(fieldSetMapper) // compile error
+    .build();
+----
+
+The tokenizer/line mapping methods (`delimited()`, `fixedLength()`, `lineTokenizer()`)
+can still be configured before or after `targetType()`/`fieldSetMapper()`, in any order.
+
+TIP: This is a source and binary breaking change for code compiled against Spring Batch
+6.0 that calls `targetType()`, `fieldSetMapper()`, `delimited()`/`formatted()` (on
+`FlatFileItemWriterBuilder`), or `columnMapped()`/`beanMapped()`, since the return type
+of these methods changed from the builder itself to a dedicated stage type. Code that
+only chains calls fluently (the vast majority of usages) needs no changes beyond a
+recompile; code that stores the return value in a variable typed as the builder class,
+or that relied on catching the `IllegalStateException` from an invalid combination, needs
+to be updated.
+
+For more details, see
+https://github.com/spring-projects/spring-batch/issues/4888[issue #4888].
+
+[[avro-reflection-based-deserialization-now-requires-trusted-classes]]
+== Avro reflection-based (de)serialization now requires trusted classes
+
+Apache Avro 1.12.2 rejects reflection-based (de)serialization (as done by
+`SpecificDatumReader`/`SpecificDatumWriter` and their reflect-based counterparts, used by
+`AvroItemReader`/`AvroItemWriter` for `SpecificRecord` and plain Java item types) of
+classes that are not explicitly trusted, throwing a `SecurityException` at runtime
+otherwise. `GenericRecord` item types are not affected.
+
+Trust the item type (and, transitively, any custom class reachable from its fields) with
+either of the `org.apache.avro.SERIALIZABLE_CLASSES` or
+`org.apache.avro.SERIALIZABLE_PACKAGES` system properties:
+
+[source]
+----
+-Dorg.apache.avro.SERIALIZABLE_PACKAGES=com.example.domain
+----
+
+or programmatically, through `org.apache.avro.util.ClassSecurityValidator`. See that
+class's Javadoc for details.
+
+TIP: This is a breaking change for applications that use `AvroItemReader`/
+`AvroItemWriter` with a `SpecificRecord` or plain Java item type: such jobs now fail at
+runtime unless the item type is explicitly trusted as shown above.
+
+[[jdbc-daos-migrated-to-jdbcclient]]
+== JDBC DAOs migrated to `JdbcClient`
+
+The JDBC implementations of the job repository DAOs (`JdbcJobInstanceDao`,
+`JdbcJobExecutionDao`, `JdbcStepExecutionDao` and `JdbcExecutionContextDao`) now use
+Spring Framework's `JdbcClient` instead of `JdbcOperations` to access the batch metadata
+tables. This gives them named parameters and a single fluent API for queries, updates
+and batch updates.
+
+The client is a required collaborator, so it is now passed to the constructor rather than
+set afterwards:
+
+[source, java]
+----
+// before
+JdbcJobInstanceDao jobInstanceDao = new JdbcJobInstanceDao();
+jobInstanceDao.setJdbcTemplate(new JdbcTemplate(dataSource));
+jobInstanceDao.setJobInstanceIncrementer(incrementer);
+jobInstanceDao.afterPropertiesSet();
+
+// after
+JdbcJobInstanceDao jobInstanceDao = new JdbcJobInstanceDao(JdbcClient.create(dataSource));
+jobInstanceDao.setJobInstanceIncrementer(incrementer);
+jobInstanceDao.afterPropertiesSet();
+----
+
+Accordingly, `AbstractJdbcBatchMetadataDao#setJdbcTemplate(JdbcOperations)` and
+`#getJdbcTemplate()` are deprecated in favor of the new constructor and of
+`#getJdbcClient()`. See the xref:whatsnew.adoc#deprecations[Deprecations] section for more
+details.
+
+Applications that configure the job repository through `@EnableBatchProcessing`,
+`@EnableJdbcJobRepository`, `JdbcDefaultBatchConfiguration`, `JdbcJobRepositoryFactoryBean`
+or `JobExplorerFactoryBean` are not affected, as these build the DAOs themselves.
+
+TIP: This is a source and binary breaking change for code compiled against Spring Batch
+6.0 that instantiates these DAOs directly, since their no-argument constructors have been
+removed. Such code needs to pass a `JdbcClient` to the constructor as shown above.
+
+For more details, see
+https://github.com/spring-projects/spring-batch/issues/4804[issue #4804].
+
+[[deprecations]]
+== Deprecations
+
+The following features have been deprecated in Spring Batch 6.1:
+
+* Deprecate Apache Derby support (`DatabaseType.DERBY`, `DerbyPagingQueryProvider` and the Derby DDL scripts), scheduled for removal in version 7.0.0
+* Deprecate the legacy date/time converters (`DateToStringConverter`, `StringToDateConverter`, `LocalDateToStringConverter`, `StringToLocalDateConverter`, `LocalTimeToStringConverter`, `StringToLocalTimeConverter`, `LocalDateTimeToStringConverter` and `StringToLocalDateTimeConverter`) in favor of `ConversionServiceFactory#createConversionService()`, scheduled for removal in version 7.0.0
+* Deprecate `StepExecution#getJobExecutionId()` and `StepExecution#getJobParameters()` in favor of `StepExecution#getJobExecution()`, scheduled for removal in version 7.0
+* Deprecate `JobExecution#getJobInstanceId()` in favor of `JobExecution#getJobInstance()`, scheduled for removal in version 7.0
+* Deprecate `RepositoryItemReader#setSorts(Map)` and `RepositoryItemReader#setRepository(PagingAndSortingRepository)` in favor of passing the sorts and the repository to the constructor, scheduled for removal in version 7.0
+* Deprecate `RepositoryItemWriter#setRepository(CrudRepository)` in favor of passing the repository to the constructor, scheduled for removal in version 7.0
+* Deprecate `org.springframework.batch.integration.async.AsyncItemProcessor`, `org.springframework.batch.integration.async.AsyncItemWriter`, and `org.springframework.batch.integration.chunk.ChunkTaskExecutorItemWriter` in favor of their counterparts in `org.springframework.batch.core.step.item`, see the xref:whatsnew.adoc#async-processing-apis-and-local-chunking-moved-to-core[Async processing APIs and local chunking moved to `spring-batch-core`] section for more details
+* Deprecate `AbstractJdbcBatchMetadataDao#setJdbcTemplate(JdbcOperations)` in favor of passing a `JdbcClient` to the constructor of the JDBC DAOs, and `AbstractJdbcBatchMetadataDao#getJdbcTemplate()` in favor of `AbstractJdbcBatchMetadataDao#getJdbcClient()`, see the xref:whatsnew.adoc#jdbc-daos-migrated-to-jdbcclient[JDBC DAOs migrated to `JdbcClient`] section for more details. Scheduled for removal in version 7.0
+* Deprecate `JobRepository#getJobInstanceCount(String)`, `JobExplorer#getJobInstanceCount(String)`, and `JobInstanceDao#getJobInstanceCount(String)` in favor of `countJobInstances(String)`, and `JobRepository#getStepExecutionCount(JobInstance, String)` and `JobExplorer#getStepExecutionCount(JobInstance, String)` in favor of `countStepExecutions(JobInstance, String)`. These methods cannot soundly determine whether a job or step name is unknown, as opposed to simply never having been persisted or executed yet; that validation belongs at the job operator level, where the job registry is available. Scheduled for removal in version 7.0

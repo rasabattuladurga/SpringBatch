@@ -1,0 +1,391 @@
+/*
+ * Copyright 2002-present the original author or authors.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.springframework.batch.core.repository.support;
+
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
+import org.jspecify.annotations.NullUnmarked;
+
+import org.springframework.batch.core.converter.ConversionServiceFactory;
+import org.springframework.batch.core.repository.ExecutionContextSerializer;
+import org.springframework.batch.core.repository.dao.AbstractJdbcBatchMetadataDao;
+import org.springframework.batch.core.repository.dao.DefaultExecutionContextSerializer;
+import org.springframework.batch.core.repository.dao.jdbc.JdbcExecutionContextDao;
+import org.springframework.batch.core.repository.dao.jdbc.JdbcJobExecutionDao;
+import org.springframework.batch.core.repository.dao.jdbc.JdbcJobInstanceDao;
+import org.springframework.batch.core.repository.dao.jdbc.JdbcStepExecutionDao;
+import org.springframework.batch.infrastructure.item.ExecutionContext;
+import org.springframework.batch.infrastructure.item.database.support.DataFieldMaxValueIncrementerFactory;
+import org.springframework.batch.infrastructure.item.database.support.DefaultDataFieldMaxValueIncrementerFactory;
+import org.springframework.batch.infrastructure.support.DatabaseType;
+import org.springframework.beans.factory.FactoryBean;
+import org.springframework.beans.factory.InitializingBean;
+import org.springframework.core.convert.support.ConfigurableConversionService;
+import org.springframework.jdbc.core.JdbcOperations;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.util.Assert;
+import org.springframework.util.StringUtils;
+
+import javax.sql.DataSource;
+import java.lang.reflect.Field;
+import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
+import java.sql.Types;
+
+import static org.springframework.batch.infrastructure.support.DatabaseType.SYBASE;
+
+/**
+ * A {@link FactoryBean} that automates the creation of a {@link SimpleJobRepository}
+ * using JDBC DAO implementations which persist batch metadata in database. Requires the
+ * user to describe what kind of database they are using.
+ *
+ * @author Ben Hale
+ * @author Lucas Ward
+ * @author Dave Syer
+ * @author Michael Minella
+ * @author Mahmoud Ben Hassine
+ * @author Yanming Zhou
+ * @author Thomas Risberg
+ * @deprecated since 6.0 in favor of {@link JdbcJobRepositoryFactoryBean}. Scheduled for
+ * removal in 6.2 or later.
+ */
+@NullUnmarked
+@Deprecated(since = "6.0", forRemoval = true)
+public class JobRepositoryFactoryBean extends AbstractJobRepositoryFactoryBean implements InitializingBean {
+
+	protected static final Log logger = LogFactory.getLog(JobRepositoryFactoryBean.class);
+
+	/**
+	 * Legacy (v5) name of the job instance incrementer.
+	 */
+	protected static final String LEGACY_JOB_INSTANCE_INCREMENTER_NAME = "JOB_SEQ";
+
+	/**
+	 * Environment variable for using the legacy (v5) jdbc schema.
+	 */
+	protected static final String SPRING_BATCH_JDBC_SCHEMA_LEGACY = "SPRING_BATCH_JDBC_SCHEMA_LEGACY";
+
+	/**
+	 * System property for using the legacy (v5) jdbc schema.
+	 */
+	protected static final String SPRING_BATCH_JDBC_SCHEMA_LEGACY_PROPERTY = "spring.batch.jdbc.schema.legacy";
+
+	protected DataSource dataSource;
+
+	protected JdbcOperations jdbcOperations;
+
+	protected String databaseType;
+
+	protected String tablePrefix = AbstractJdbcBatchMetadataDao.DEFAULT_TABLE_PREFIX;
+
+	protected String jobInstanceIncrementerName = AbstractJdbcBatchMetadataDao.DEFAULT_JOB_INSTANCE_INCREMENTER_NAME;
+
+	protected String jobExecutionIncrementerName = AbstractJdbcBatchMetadataDao.DEFAULT_JOB_EXECUTION_INCREMENTER_NAME;
+
+	protected String stepExecutionIncrementerName = AbstractJdbcBatchMetadataDao.DEFAULT_STEP_EXECUTION_INCREMENTER_NAME;
+
+	protected DataFieldMaxValueIncrementerFactory incrementerFactory;
+
+	protected int maxVarCharLengthForExitMessage = AbstractJdbcBatchMetadataDao.DEFAULT_EXIT_MESSAGE_LENGTH;
+
+	protected int maxVarCharLengthForShortContext = AbstractJdbcBatchMetadataDao.DEFAULT_SHORT_CONTEXT_LENGTH;
+
+	protected ExecutionContextSerializer serializer;
+
+	protected Integer clobType;
+
+	protected Charset charset = StandardCharsets.UTF_8;
+
+	protected ConfigurableConversionService conversionService = ConversionServiceFactory.createConversionService();
+
+	protected Object getTarget() {
+		JdbcJobInstanceDao jobInstanceDao = createJobInstanceDao();
+		JdbcJobExecutionDao jobExecutionDao = createJobExecutionDao();
+		jobExecutionDao.setJobInstanceDao(jobInstanceDao);
+		JdbcStepExecutionDao stepExecutionDao = createStepExecutionDao();
+		stepExecutionDao.setJobExecutionDao(jobExecutionDao);
+		JdbcExecutionContextDao executionContextDao = createExecutionContextDao();
+		return new SimpleJobRepository(jobInstanceDao, jobExecutionDao, stepExecutionDao, executionContextDao);
+	}
+
+	/**
+	 * @param type a value from the {@link java.sql.Types} class to indicate the type to
+	 * use for a CLOB
+	 */
+	public void setClobType(int type) {
+		this.clobType = type;
+	}
+
+	/**
+	 * A custom implementation of the {@link ExecutionContextSerializer}. The default, if
+	 * not injected, is the {@link DefaultExecutionContextSerializer}.
+	 * @param serializer used to serialize/deserialize {@link ExecutionContext}
+	 * @see ExecutionContextSerializer
+	 */
+	public void setSerializer(ExecutionContextSerializer serializer) {
+		this.serializer = serializer;
+	}
+
+	/**
+	 * Public setter for the length of long string columns in database. Do not set this if
+	 * you haven't modified the schema. Note this value will be used for the exit message
+	 * in both {@link JdbcJobExecutionDao} and {@link JdbcStepExecutionDao} and also the
+	 * short version of the execution context in {@link JdbcExecutionContextDao} . If you
+	 * want to use separate values for exit message and short context, then use
+	 * {@link #setMaxVarCharLengthForExitMessage(int)} and
+	 * {@link #setMaxVarCharLengthForShortContext(int)}. For databases with multi-byte
+	 * character sets this number can be smaller (by up to a factor of 2 for 2-byte
+	 * characters) than the declaration of the column length in the DDL for the tables.
+	 * @param maxVarCharLength the exitMessageLength to set
+	 */
+	public void setMaxVarCharLength(int maxVarCharLength) {
+		this.maxVarCharLengthForExitMessage = maxVarCharLength;
+		this.maxVarCharLengthForShortContext = maxVarCharLength;
+	}
+
+	/**
+	 * Public setter for the length of short context string column in database. Do not set
+	 * this if you haven't modified the schema. For databases with multi-byte character
+	 * sets this number can be smaller (by up to a factor of 2 for 2-byte characters) than
+	 * the declaration of the column length in the DDL for the tables. Defaults to
+	 * {@link AbstractJdbcBatchMetadataDao#DEFAULT_SHORT_CONTEXT_LENGTH}
+	 * @param maxVarCharLengthForShortContext the short context length to set
+	 * @since 5.1
+	 */
+	public void setMaxVarCharLengthForShortContext(int maxVarCharLengthForShortContext) {
+		this.maxVarCharLengthForShortContext = maxVarCharLengthForShortContext;
+	}
+
+	/**
+	 * Public setter for the length of the exit message in both
+	 * {@link JdbcJobExecutionDao} and {@link JdbcStepExecutionDao}. Do not set this if
+	 * you haven't modified the schema. For databases with multi-byte character sets this
+	 * number can be smaller (by up to a factor of 2 for 2-byte characters) than the
+	 * declaration of the column length in the DDL for the tables. Defaults to
+	 * {@link AbstractJdbcBatchMetadataDao#DEFAULT_EXIT_MESSAGE_LENGTH}.
+	 * @param maxVarCharLengthForExitMessage the exitMessageLength to set
+	 * @since 5.1
+	 */
+	public void setMaxVarCharLengthForExitMessage(int maxVarCharLengthForExitMessage) {
+		this.maxVarCharLengthForExitMessage = maxVarCharLengthForExitMessage;
+	}
+
+	/**
+	 * Public setter for the {@link DataSource}.
+	 * @param dataSource a {@link DataSource}
+	 */
+	public void setDataSource(DataSource dataSource) {
+		this.dataSource = dataSource;
+	}
+
+	/**
+	 * Public setter for the {@link JdbcOperations}. If this property is not set
+	 * explicitly, a new {@link JdbcTemplate} will be created for the configured
+	 * DataSource by default.
+	 * @param jdbcOperations a {@link JdbcOperations}
+	 */
+	public void setJdbcOperations(JdbcOperations jdbcOperations) {
+		this.jdbcOperations = jdbcOperations;
+	}
+
+	/**
+	 * Sets the database type.
+	 * @param dbType as specified by {@link DefaultDataFieldMaxValueIncrementerFactory}
+	 */
+	public void setDatabaseType(String dbType) {
+		this.databaseType = dbType;
+	}
+
+	/**
+	 * Sets the table prefix for all the batch meta-data tables.
+	 * @param tablePrefix prefix prepended to batch meta-data tables
+	 */
+	public void setTablePrefix(String tablePrefix) {
+		this.tablePrefix = tablePrefix;
+	}
+
+	/**
+	 * Sets the job instance incrementer name.
+	 * @param jobInstanceIncrementerName job instance incrementer name
+	 */
+	public void setJobInstanceIncrementerName(String jobInstanceIncrementerName) {
+		this.jobInstanceIncrementerName = jobInstanceIncrementerName;
+	}
+
+	/**
+	 * Sets the job execution incrementer name.
+	 * @param jobExecutionIncrementerName job execution incrementer name
+	 */
+	public void setJobExecutionIncrementerName(String jobExecutionIncrementerName) {
+		this.jobExecutionIncrementerName = jobExecutionIncrementerName;
+	}
+
+	/**
+	 * Sets the step execution incrementer name.
+	 * @param stepExecutionIncrementerName step execution incrementer name
+	 */
+	public void setStepExecutionIncrementerName(String stepExecutionIncrementerName) {
+		this.stepExecutionIncrementerName = stepExecutionIncrementerName;
+	}
+
+	public void setIncrementerFactory(DataFieldMaxValueIncrementerFactory incrementerFactory) {
+		this.incrementerFactory = incrementerFactory;
+	}
+
+	/**
+	 * Set the {@link Charset} to use when serializing/deserializing the execution
+	 * context. Defaults to "UTF-8". Must not be {@code null}.
+	 * @param charset to use when serializing/deserializing the execution context.
+	 * @see JdbcExecutionContextDao#setCharset(Charset)
+	 * @since 5.0
+	 */
+	public void setCharset(Charset charset) {
+		Assert.notNull(charset, "Charset must not be null");
+		this.charset = charset;
+	}
+
+	/**
+	 * Set the conversion service to use in the job repository. This service is used to
+	 * convert job parameters from String literal to typed values and vice versa.
+	 * @param conversionService the conversion service to use
+	 * @since 5.0
+	 */
+	public void setConversionService(ConfigurableConversionService conversionService) {
+		Assert.notNull(conversionService, "ConversionService must not be null");
+		this.conversionService = conversionService;
+	}
+
+	@Override
+	public void afterPropertiesSet() throws Exception {
+
+		Assert.state(dataSource != null, "DataSource must not be null.");
+
+		if (jdbcOperations == null) {
+			jdbcOperations = new JdbcTemplate(dataSource);
+		}
+
+		if (incrementerFactory == null) {
+			incrementerFactory = new DefaultDataFieldMaxValueIncrementerFactory(dataSource);
+		}
+
+		if (databaseType == null) {
+			databaseType = DatabaseType.fromMetaData(dataSource).name();
+			if (logger.isDebugEnabled()) {
+				logger.debug("No database type set, using meta data indicating: " + databaseType);
+			}
+		}
+
+		if (serializer == null) {
+			serializer = new DefaultExecutionContextSerializer();
+		}
+
+		Assert.state(incrementerFactory.isSupportedIncrementerType(databaseType),
+				() -> "'" + databaseType + "' is an unsupported database type.  The supported database types are "
+						+ StringUtils.arrayToCommaDelimitedString(incrementerFactory.getSupportedIncrementerTypes()));
+
+		if (clobType != null) {
+			Assert.state(isValidTypes(clobType), "lobType must be a value from the java.sql.Types class");
+		}
+
+		super.afterPropertiesSet();
+	}
+
+	@Override
+	protected JdbcJobInstanceDao createJobInstanceDao() {
+		JdbcJobInstanceDao dao = new JdbcJobInstanceDao(JdbcClient.create(jdbcOperations));
+		String legacySchema = "false";
+		if (System.getenv(SPRING_BATCH_JDBC_SCHEMA_LEGACY) != null) {
+			legacySchema = System.getenv(SPRING_BATCH_JDBC_SCHEMA_LEGACY);
+		}
+		else if (System.getProperty(SPRING_BATCH_JDBC_SCHEMA_LEGACY_PROPERTY) != null) {
+			legacySchema = System.getProperty(SPRING_BATCH_JDBC_SCHEMA_LEGACY_PROPERTY);
+		}
+		if ("TRUE".equalsIgnoreCase(legacySchema) || "YES".equalsIgnoreCase(legacySchema)) {
+			jobInstanceIncrementerName = LEGACY_JOB_INSTANCE_INCREMENTER_NAME;
+			logger.info("Using legacy name for job instance incrementer: " + jobInstanceIncrementerName);
+		}
+		dao.setJobInstanceIncrementer(
+				incrementerFactory.getIncrementer(databaseType, tablePrefix + jobInstanceIncrementerName));
+		dao.setJobKeyGenerator(jobKeyGenerator);
+		dao.setTablePrefix(tablePrefix);
+		return dao;
+	}
+
+	@Override
+	protected JdbcJobExecutionDao createJobExecutionDao() {
+		JdbcJobExecutionDao dao = new JdbcJobExecutionDao(JdbcClient.create(jdbcOperations));
+		dao.setJobExecutionIncrementer(
+				incrementerFactory.getIncrementer(databaseType, tablePrefix + jobExecutionIncrementerName));
+		dao.setTablePrefix(tablePrefix);
+		dao.setClobTypeToUse(determineClobTypeToUse(this.databaseType));
+		dao.setExitMessageLength(this.maxVarCharLengthForExitMessage);
+		dao.setConversionService(this.conversionService);
+		return dao;
+	}
+
+	@Override
+	protected JdbcStepExecutionDao createStepExecutionDao() {
+		JdbcStepExecutionDao dao = new JdbcStepExecutionDao(JdbcClient.create(jdbcOperations));
+		dao.setStepExecutionIncrementer(
+				incrementerFactory.getIncrementer(databaseType, tablePrefix + stepExecutionIncrementerName));
+		dao.setTablePrefix(tablePrefix);
+		dao.setClobTypeToUse(determineClobTypeToUse(this.databaseType));
+		dao.setExitMessageLength(this.maxVarCharLengthForExitMessage);
+		return dao;
+	}
+
+	@Override
+	protected JdbcExecutionContextDao createExecutionContextDao() {
+		JdbcExecutionContextDao dao = new JdbcExecutionContextDao(JdbcClient.create(jdbcOperations));
+		dao.setTablePrefix(tablePrefix);
+		dao.setClobTypeToUse(determineClobTypeToUse(this.databaseType));
+		dao.setSerializer(serializer);
+		dao.setCharset(charset);
+		dao.setShortContextLength(this.maxVarCharLengthForShortContext);
+		return dao;
+	}
+
+	private int determineClobTypeToUse(String databaseType) {
+		if (clobType != null) {
+			return clobType;
+		}
+		else {
+			if (SYBASE == DatabaseType.valueOf(databaseType.toUpperCase())) {
+				return Types.LONGVARCHAR;
+			}
+			else {
+				return Types.CLOB;
+			}
+		}
+	}
+
+	private boolean isValidTypes(int value) throws Exception {
+		boolean result = false;
+
+		for (Field field : Types.class.getFields()) {
+			int curValue = field.getInt(null);
+			if (curValue == value) {
+				result = true;
+				break;
+			}
+		}
+
+		return result;
+	}
+
+}

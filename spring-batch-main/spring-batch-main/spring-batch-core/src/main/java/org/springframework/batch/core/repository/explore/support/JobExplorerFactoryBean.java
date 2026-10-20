@@ -1,0 +1,213 @@
+/*
+ * Copyright 2002-present the original author or authors.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.springframework.batch.core.repository.explore.support;
+
+import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
+
+import javax.sql.DataSource;
+
+import org.springframework.batch.core.converter.ConversionServiceFactory;
+import org.springframework.batch.core.job.DefaultJobKeyGenerator;
+
+import org.springframework.batch.core.job.JobKeyGenerator;
+import org.springframework.batch.core.repository.ExecutionContextSerializer;
+import org.springframework.batch.core.repository.dao.AbstractJdbcBatchMetadataDao;
+import org.springframework.batch.core.repository.dao.DefaultExecutionContextSerializer;
+import org.springframework.batch.core.repository.dao.ExecutionContextDao;
+import org.springframework.batch.core.repository.dao.jdbc.JdbcExecutionContextDao;
+import org.springframework.batch.core.repository.dao.jdbc.JdbcJobExecutionDao;
+import org.springframework.batch.core.repository.dao.jdbc.JdbcJobInstanceDao;
+import org.springframework.batch.core.repository.dao.jdbc.JdbcStepExecutionDao;
+import org.springframework.batch.core.repository.dao.JobExecutionDao;
+import org.springframework.batch.core.repository.dao.JobInstanceDao;
+import org.springframework.batch.core.repository.dao.StepExecutionDao;
+import org.springframework.batch.core.repository.support.JdbcJobRepositoryFactoryBean;
+import org.springframework.batch.infrastructure.item.ExecutionContext;
+import org.springframework.beans.factory.FactoryBean;
+import org.springframework.beans.factory.InitializingBean;
+import org.springframework.core.convert.support.ConfigurableConversionService;
+import org.springframework.jdbc.core.JdbcOperations;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.jdbc.support.incrementer.AbstractDataFieldMaxValueIncrementer;
+import org.springframework.jdbc.support.incrementer.DataFieldMaxValueIncrementer;
+import org.springframework.util.Assert;
+
+/**
+ * A {@link FactoryBean} that automates the creation of a {@link SimpleJobExplorer} by
+ * using JDBC DAO implementations. Requires the user to describe what kind of database
+ * they use.
+ *
+ * @author Dave Syer
+ * @author Mahmoud Ben Hassine
+ * @since 2.0
+ * @deprecated since 6.0 in favor of {@link JdbcJobRepositoryFactoryBean}. Scheduled for
+ * removal in 6.2 or later.
+ */
+@Deprecated(since = "6.0", forRemoval = true)
+public class JobExplorerFactoryBean extends AbstractJobExplorerFactoryBean implements InitializingBean {
+
+	protected DataSource dataSource;
+
+	protected JdbcOperations jdbcOperations;
+
+	protected String tablePrefix = AbstractJdbcBatchMetadataDao.DEFAULT_TABLE_PREFIX;
+
+	protected final DataFieldMaxValueIncrementer incrementer = new AbstractDataFieldMaxValueIncrementer() {
+		@Override
+		protected long getNextKey() {
+			throw new IllegalStateException("JobExplorer is read only.");
+		}
+	};
+
+	protected JobKeyGenerator jobKeyGenerator;
+
+	protected ExecutionContextSerializer serializer;
+
+	protected Charset charset = StandardCharsets.UTF_8;
+
+	protected ConfigurableConversionService conversionService = ConversionServiceFactory.createConversionService();
+
+	/**
+	 * A custom implementation of {@link ExecutionContextSerializer}. The default, if not
+	 * injected, is the {@link DefaultExecutionContextSerializer}.
+	 * @param serializer The serializer used to serialize or deserialize an
+	 * {@link ExecutionContext}.
+	 * @see ExecutionContextSerializer
+	 */
+	public void setSerializer(ExecutionContextSerializer serializer) {
+		this.serializer = serializer;
+	}
+
+	/**
+	 * Sets the data source.
+	 * <p>
+	 * Public setter for the {@link DataSource}.
+	 * @param dataSource A {@code DataSource}.
+	 */
+	public void setDataSource(DataSource dataSource) {
+		this.dataSource = dataSource;
+	}
+
+	/**
+	 * Public setter for the {@link JdbcOperations}. If this property is not explicitly
+	 * set, a new {@link JdbcTemplate} is created, by default, for the configured
+	 * {@link DataSource}.
+	 * @param jdbcOperations a {@link JdbcOperations}
+	 */
+	public void setJdbcOperations(JdbcOperations jdbcOperations) {
+		this.jdbcOperations = jdbcOperations;
+	}
+
+	/**
+	 * Sets the table prefix for all the batch metadata tables.
+	 * @param tablePrefix The table prefix for the batch metadata tables.
+	 */
+	public void setTablePrefix(String tablePrefix) {
+		this.tablePrefix = tablePrefix;
+	}
+
+	/**
+	 * * Sets the generator for creating the key used in identifying unique {link
+	 * JobInstance} objects
+	 * @param jobKeyGenerator a {@link JobKeyGenerator}
+	 * @since 5.1
+	 */
+	public void setJobKeyGenerator(JobKeyGenerator jobKeyGenerator) {
+		this.jobKeyGenerator = jobKeyGenerator;
+	}
+
+	/**
+	 * Sets the {@link Charset} to use when deserializing the execution context. Defaults
+	 * to "UTF-8". Must not be {@code null}.
+	 * @param charset The character set to use when deserializing the execution context.
+	 * @see JdbcExecutionContextDao#setCharset(Charset)
+	 * @since 5.0
+	 */
+	public void setCharset(Charset charset) {
+		Assert.notNull(charset, "Charset must not be null");
+		this.charset = charset;
+	}
+
+	/**
+	 * Set the conversion service to use in the job explorer. This service is used to
+	 * convert job parameters from String literal to typed values and vice versa.
+	 * @param conversionService the conversion service to use
+	 * @since 5.0
+	 */
+	public void setConversionService(ConfigurableConversionService conversionService) {
+		Assert.notNull(conversionService, "ConversionService must not be null");
+		this.conversionService = conversionService;
+	}
+
+	@Override
+	public void afterPropertiesSet() throws Exception {
+
+		Assert.state(dataSource != null, "DataSource must not be null.");
+
+		if (jdbcOperations == null) {
+			jdbcOperations = new JdbcTemplate(dataSource);
+		}
+
+		if (jobKeyGenerator == null) {
+			jobKeyGenerator = new DefaultJobKeyGenerator();
+		}
+
+		if (serializer == null) {
+			serializer = new DefaultExecutionContextSerializer();
+		}
+
+		super.afterPropertiesSet();
+	}
+
+	@Override
+	protected ExecutionContextDao createExecutionContextDao() {
+		JdbcExecutionContextDao dao = new JdbcExecutionContextDao(JdbcClient.create(jdbcOperations));
+		dao.setTablePrefix(tablePrefix);
+		dao.setSerializer(serializer);
+		dao.setCharset(charset);
+		return dao;
+	}
+
+	@Override
+	protected JobInstanceDao createJobInstanceDao() {
+		JdbcJobInstanceDao dao = new JdbcJobInstanceDao(JdbcClient.create(jdbcOperations));
+		dao.setJobInstanceIncrementer(incrementer);
+		dao.setJobKeyGenerator(jobKeyGenerator);
+		dao.setTablePrefix(tablePrefix);
+		return dao;
+	}
+
+	@Override
+	protected JobExecutionDao createJobExecutionDao() {
+		JdbcJobExecutionDao dao = new JdbcJobExecutionDao(JdbcClient.create(jdbcOperations));
+		dao.setJobExecutionIncrementer(incrementer);
+		dao.setTablePrefix(tablePrefix);
+		dao.setConversionService(this.conversionService);
+		return dao;
+	}
+
+	@Override
+	protected StepExecutionDao createStepExecutionDao() {
+		JdbcStepExecutionDao dao = new JdbcStepExecutionDao(JdbcClient.create(jdbcOperations));
+		dao.setStepExecutionIncrementer(incrementer);
+		dao.setTablePrefix(tablePrefix);
+		return dao;
+	}
+
+}

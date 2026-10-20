@@ -1,0 +1,180 @@
+/*
+ * Copyright 2006-2025 the original author or authors.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package org.springframework.batch.test;
+
+import java.lang.reflect.Method;
+
+import org.springframework.batch.core.step.StepExecution;
+
+import org.jspecify.annotations.Nullable;
+import org.springframework.batch.core.scope.context.StepContext;
+import org.springframework.batch.core.scope.context.StepSynchronizationManager;
+import org.springframework.batch.infrastructure.item.adapter.HippyMethodInvoker;
+import org.springframework.test.context.TestContext;
+import org.springframework.test.context.TestExecutionListener;
+import org.springframework.util.ReflectionUtils;
+import org.springframework.util.ReflectionUtils.MethodCallback;
+
+/**
+ * A {@link TestExecutionListener} that sets up step-scope context for dependency
+ * injection into unit tests. A {@link StepContext} will be created for the duration of a
+ * test method and made available to any dependencies that are injected. The default
+ * behaviour is just to create a {@link StepExecution} with fixed properties.
+ * Alternatively, it can be provided by the test case as a factory methods returning the
+ * correct type. Example:
+ *
+ * <pre>
+ * &#064;ContextConfiguration
+ * &#064;TestExecutionListeners( { DependencyInjectionTestExecutionListener.class, StepScopeTestExecutionListener.class })
+ * &#064;SpringJUnitConfig
+ * public class StepScopeTestExecutionListenerIntegrationTests {
+ *
+ * 	// A step-scoped dependency configured in the ApplicationContext
+ * 	&#064;Autowired
+ * 	private ItemReader&lt;String&gt; reader;
+ *
+ *  public StepExecution getStepExecution() {
+ *    StepExecution execution = MetaDataInstanceFactory.createStepExecution();
+ *    execution.getExecutionContext().putString("foo", "bar");
+ *    return execution;
+ *  }
+ *
+ * 	&#064;Test
+ * 	public void testStepScopedReader() {
+ * 		// Step context is active here so the reader can be used,
+ *      // and the step execution context will contain foo=bar...
+ * 		assertNotNull(reader.read());
+ * 	}
+ *
+ * }
+ * </pre>
+ *
+ * @author Dave Syer
+ * @author Chris Schaefer
+ * @author Mahmoud Ben Hassine
+ * @author Stefano Cordio
+ * @author Hyuntae Park
+ */
+public class StepScopeTestExecutionListener implements TestExecutionListener {
+
+	private static final String STEP_EXECUTION = StepScopeTestExecutionListener.class.getName() + ".STEP_EXECUTION";
+
+	/**
+	 * Set up a {@link StepExecution} as a test context attribute.
+	 * @param testContext the current test context
+	 * @see TestExecutionListener#prepareTestInstance(TestContext)
+	 */
+	@Override
+	public void prepareTestInstance(TestContext testContext) {
+		StepExecution stepExecution = getStepExecution(testContext);
+
+		if (stepExecution != null) {
+			testContext.setAttribute(STEP_EXECUTION, stepExecution);
+		}
+	}
+
+	/**
+	 * @param testContext the current test context
+	 * @see TestExecutionListener#beforeTestMethod(TestContext)
+	 */
+	@Override
+	public void beforeTestMethod(TestContext testContext) {
+
+		if (testContext.hasAttribute(STEP_EXECUTION)) {
+			StepExecution stepExecution = (StepExecution) testContext.getAttribute(STEP_EXECUTION);
+			if (stepExecution != null) {
+				StepSynchronizationManager.register(stepExecution);
+			}
+		}
+	}
+
+	/**
+	 * @param testContext the current test context
+	 * @see TestExecutionListener#afterTestMethod(TestContext)
+	 */
+	@Override
+	public void afterTestMethod(TestContext testContext) {
+
+		if (testContext.hasAttribute(STEP_EXECUTION)) {
+			StepSynchronizationManager.close();
+		}
+	}
+
+	/**
+	 * Discover a {@link StepExecution} as a field in the test case or create one if none
+	 * is available.
+	 * @param testContext the current test context
+	 * @return a {@link StepExecution}
+	 */
+	protected StepExecution getStepExecution(TestContext testContext) {
+		Object target = testContext.getTestInstance();
+
+		ExtractorMethodCallback method = new ExtractorMethodCallback(StepExecution.class, "getStepExecution");
+		ReflectionUtils.doWithMethods(target.getClass(), method);
+		if (method.getName() != null) {
+			HippyMethodInvoker invoker = new HippyMethodInvoker();
+			invoker.setTargetObject(target);
+			invoker.setTargetMethod(method.getName());
+			try {
+				invoker.prepare();
+				Object invoke = invoker.invoke();
+				if (invoke != null) {
+					return (StepExecution) invoke;
+				}
+			}
+			catch (Exception e) {
+				throw new IllegalArgumentException("Could not create step execution from method: " + method.getName(),
+						e);
+			}
+		}
+
+		return MetaDataInstanceFactory.createStepExecution();
+	}
+
+	/**
+	 * Look for a method returning the type provided, preferring one with the name
+	 * provided.
+	 */
+	private static final class ExtractorMethodCallback implements MethodCallback {
+
+		private final String preferredName;
+
+		private final Class<?> preferredType;
+
+		private @Nullable Method result;
+
+		public ExtractorMethodCallback(Class<?> preferredType, String preferredName) {
+			this.preferredType = preferredType;
+			this.preferredName = preferredName;
+		}
+
+		public @Nullable String getName() {
+			return result == null ? null : result.getName();
+		}
+
+		@Override
+		public void doWith(Method method) throws IllegalArgumentException {
+			Class<?> type = method.getReturnType();
+			if (preferredType.isAssignableFrom(type)) {
+				if (result == null || method.getName().equals(preferredName)) {
+					result = method;
+				}
+			}
+		}
+
+	}
+
+}
